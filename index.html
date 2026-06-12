@@ -166,6 +166,11 @@ canvas{display:block;position:fixed;inset:0;z-index:1;touch-action:none;}
         CLASS 701/5<br><span style="font-size:0.62rem;color:rgba(180,210,235,0.55);letter-spacing:0.2em;">ALSTOM · 5-CAR · 100MPH</span>
       </button>
     </div>
+    <h2 id="routeHeader" style="display:none;">Select Service</h2>
+    <label id="routeRow" style="display:none;flex-direction:column;align-items:stretch;gap:0.3em;margin-bottom:1.0rem;font-size:0.72rem;letter-spacing:0.22em;color:rgba(180,210,235,0.85);text-transform:uppercase;">
+      <select id="routeSelect" style="background:rgba(8,16,28,0.85);border:1px solid rgba(92,200,255,0.4);color:#cfe6f7;font-family:'Roboto Mono',monospace;font-size:0.82rem;padding:0.55rem 0.7rem;letter-spacing:0.08em;text-transform:none;cursor:pointer;border-radius:2px;outline:none;"></select>
+      <span id="routeMeta" style="font-size:0.62rem;color:rgba(180,210,235,0.55);letter-spacing:0.15em;text-align:center;"></span>
+    </label>
     <label style="display:flex;align-items:center;justify-content:center;gap:0.6em;margin-bottom:0.7rem;font-size:0.78rem;letter-spacing:0.18em;color:rgba(180,210,235,0.75);cursor:pointer;text-transform:uppercase;">
       <input id="fastChk" type="checkbox" style="width:1.1em;height:1.1em;accent-color:#5cc8ff;cursor:pointer;">
       2× speed
@@ -14070,7 +14075,11 @@ const MAP_WELSHAM = {
       "height": 35
     }
   ],
-  "shapePoints": []
+  "shapePoints": [],
+  "routes": [
+    { "name": "Limited Stops",      "code": "2X43", "stations": [0, 3, 5, 7] },
+    { "name": "Match-day Express",  "code": "2X44", "stations": [0, 4, 7]    }
+  ]
 };
 
 const MAPS = {
@@ -20867,6 +20876,85 @@ function buildMenuList(){
   }).join('');
 }
 
+// Service / route picker. JSON route entries are { name, code, stations:[idx] }
+// where the indices reference the map's original station array. Picking a
+// route swaps the live stations + schedule down to that subset; the train
+// physically passes through the same line but only dwells at called stations.
+// Index -1 is the synthetic "Full route" entry — every station called.
+function getRoutes(map){ return (map && Array.isArray(map.routes)) ? map.routes : []; }
+function _snapshotOrig(map){
+  if (!map._origStations) map._origStations = map.stations.slice();
+  if (!map._origSchedule) map._origSchedule = map.schedule.slice();
+}
+function applyRouteByIdx(map, idx){
+  _snapshotOrig(map);
+  const routes = getRoutes(map);
+  if (idx < 0 || idx >= routes.length){
+    map.stations = map._origStations.slice();
+    map.schedule = map._origSchedule.slice();
+    map._activeRouteIdx = -1;
+    map._activeRouteName = null;
+    return;
+  }
+  const r = routes[idx];
+  const wanted = (r.stations || []).slice().sort((a,b) => a-b)
+    .filter(i => i >= 0 && i < map._origStations.length);
+  // Always anchor the very first station so the train has a defined departure.
+  if (!wanted.includes(0)) wanted.unshift(0);
+  const dedup = Array.from(new Set(wanted));
+  map.stations = dedup.map(i => map._origStations[i]);
+  map.schedule = dedup.map(i => map._origSchedule[i] != null ? map._origSchedule[i] : 0);
+  // Re-base schedule so the first called stop is t=0; the sim treats
+  // schedule[0] as the service-start instant.
+  if (map.schedule.length){
+    const base = map.schedule[0];
+    map.schedule = map.schedule.map(t => t - base);
+  }
+  map._activeRouteIdx = idx;
+  map._activeRouteName = r.name || ('Route ' + (idx + 1));
+}
+function rebuildRouteSelect(){
+  const sel = document.getElementById('routeSelect');
+  const row = document.getElementById('routeRow');
+  const hdr = document.getElementById('routeHeader');
+  const meta = document.getElementById('routeMeta');
+  if (!sel || !row || !hdr) return;
+  const routes = getRoutes(ROUTE);
+  if (!routes.length){
+    row.style.display = 'none';
+    hdr.style.display = 'none';
+    if (meta) meta.textContent = '';
+    return;
+  }
+  row.style.display = 'flex';
+  hdr.style.display = 'block';
+  const opts = ['<option value="-1">Full route — all stops</option>'];
+  routes.forEach((r, i) => {
+    const code = (r.code ? r.code + ' · ' : '');
+    const n = (r.stations || []).length;
+    opts.push(`<option value="${i}">${code}${escapeHtmlForOption(r.name || 'Route ' + (i+1))} (${n} stops)</option>`);
+  });
+  sel.innerHTML = opts.join('');
+  const activeIdx = (ROUTE._activeRouteIdx != null) ? ROUTE._activeRouteIdx : -1;
+  sel.value = String(activeIdx);
+  const totalStops = ROUTE.stations.length;
+  meta.textContent = totalStops + ' stop' + (totalStops === 1 ? '' : 's') + ' · ' + ROUTE.totalKm.toFixed(1) + ' km';
+}
+function escapeHtmlForOption(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function onRouteSelectChange(){
+  const sel = document.getElementById('routeSelect');
+  if (!sel) return;
+  const idx = parseInt(sel.value, 10);
+  applyRouteByIdx(ROUTE, Number.isFinite(idx) ? idx : -1);
+  // Reproject — original stations carry .X/.Z from the prior projection so
+  // this is mostly a no-op for the bundled map, but stays correct for any
+  // future map switch.
+  initRouteProjection();
+  buildWorld();
+  buildMenuList();
+  rebuildRouteSelect();
+}
+
 // Map selector buttons are rendered from MAPS so adding a route in phase 2
 // only needs a new MAPS entry — no HTML to touch. Mirrors the unit selector's
 // .unitBtn styling so the panel reads consistently.
@@ -20939,9 +21027,13 @@ function selectMap(key){
   if (GS.map && GS.map.key === key) return;
   ROUTE = MAPS[key];
   GS.map = MAPS[key];
+  // Reset to "Full route" on map switch — route indices belong to whichever
+  // map they were exported from, so they don't carry across maps.
+  applyRouteByIdx(ROUTE, -1);
   initRouteProjection();
   buildWorld();
   buildMenuList();
+  rebuildRouteSelect();
   // Force cab rebuild so the printed schedule card and stop markers reflect
   // the new route. buildAndAttachCab early-returns on identical train key, so
   // we have to invalidate the mounted-cab marker manually.
@@ -20949,6 +21041,8 @@ function selectMap(key){
   buildAndAttachCab(GS.train);
   document.title = 'Welsham Test — ' + ROUTE.name + ' · ' + GS.train.name;
 }
+
+document.getElementById('routeSelect').addEventListener('change', onRouteSelectChange);
 
 // ============================================================
 // CUSTOM MAP LOADER — accept a JSON file or URL describing a
@@ -21075,6 +21169,7 @@ buildWorld();          // initial world from MAPS.welsham (the only built-in ROU
 buildMapList();        // render one button per MAPS entry
 selectMap(GS.map.key); // seed selected-state styling; same-key no-op skips rebuild
 buildMenuList();
+rebuildRouteSelect();
 // Build the default-unit cab now — GS is declared above, so reading GS.train
 // here is safe. Doing it before the render loop starts ensures cabGroup is
 // populated on the very first frame (the menu sits on top until START).
