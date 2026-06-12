@@ -597,6 +597,14 @@ const MAP_WELSHAM = {
       "lat": 105
     },
     {
+      "km": 12.5,
+      "lat": -45
+    },
+    {
+      "km": 13.6,
+      "lat": 80
+    },
+    {
       "km": 9.39,
       "lat": 1949
     },
@@ -16192,6 +16200,16 @@ function buildScatter(){
 // is wired into the main loop to advance the cars each frame.
 // ============================================================
 let TRAFFIC = { cars: [], centerline: [], cumLen: [], total: 0 };
+// Local-terrain Y offset used both by the road ribbon and by the level-
+// crossing markings so they sit at the same height as the tarmac. Pure
+// function of (km, lat) — duplicated formula from buildRoads' previous
+// inline version when this got hoisted.
+function _roadGradeOffset(km, lat){
+  const lf = min(1, abs(lat) / 350);
+  const und = (sin(km*0.3 + lat*0.01)*3.5 + cos(km*0.7 + lat*0.005)*2.0) * lf;
+  return und - 0.6;
+}
+
 function buildRoads(){
   const group = new THREE.Group();
   TRAFFIC = { cars: [], centerline: [], cumLen: [], total: 0 };
@@ -16210,18 +16228,12 @@ function buildRoads(){
   // road sits flush on the grass rather than burying itself wherever the
   // ground bumps up. Mirrors buildTerrain's per-vertex offset formula
   // (also used by buildRiver) so all three meshes use the same surface.
-  const ROAD_TERRAIN_HALF_W = 350;
-  function roadGradeOffset(km, lat){
-    const lf = min(1, abs(lat) / ROAD_TERRAIN_HALF_W);
-    const und = (sin(km*0.3 + lat*0.01)*3.5 + cos(km*0.7 + lat*0.005)*2.0) * lf;
-    return und - 0.6;
-  }
   for (const pt of path){
     const km = clamp(pt.km, 0, ROUTE.totalKm);
     const lat = pt.lat || 0;
     const f = trackFrame(km);
     const p = f.p.clone().add(f.r.clone().multiplyScalar(lat));
-    p.y += roadGradeOffset(km, lat) + 0.05;
+    p.y += _roadGradeOffset(km, lat) + 0.05;
     TRAFFIC.centerline.push(p);
   }
   // Cumulative arc length along the polyline — used both for car
@@ -16313,6 +16325,153 @@ function buildRoads(){
   }
   return group;
 }
+// ============================================================
+// LEVEL CROSSINGS — auto-detected wherever the road polyline
+// crosses the rail (sign change in roadPath.lat between two
+// consecutive points). At each crossing we drop:
+//   • a wide white painted box over the rail
+//   • a thin painted "stop line" on each side of the rail
+//   • a pair of red-and-white striped barrier arms (one each
+//     side, in the lowered position — trains have priority)
+//   • a red warning lamp on each barrier post
+// No animation: barriers stay closed. Trains read through these
+// the same way they do through buildings — the crossings are
+// scenery, not physics colliders.
+// ============================================================
+function buildLevelCrossings(){
+  const group = new THREE.Group();
+  const path = (ROUTE.roadPath || [])
+    .filter(p => p && typeof p.km === 'number')
+    .slice()
+    .sort((a, b) => a.km - b.km);
+  if (path.length < 2) return group;
+
+  // Detect crossings: any segment where lat changes sign. Linear-interpolate
+  // the crossing km from the two endpoints' lat values so the crossing sits
+  // exactly on the rail rather than at one of the editor's clicked points.
+  const crossings = [];
+  for (let i = 0; i < path.length - 1; i++){
+    const a = path[i], b = path[i+1];
+    const la = a.lat || 0, lb = b.lat || 0;
+    // Same-sign non-zero pairs don't cross.
+    if (la !== 0 && lb !== 0 && (la > 0) === (lb > 0)) continue;
+    // Degenerate: both ~zero — skip rather than emit a phantom crossing.
+    const denom = Math.abs(la) + Math.abs(lb);
+    if (denom < 0.5) continue;
+    const t = Math.abs(la) / denom;
+    const km = a.km + (b.km - a.km) * t;
+    if (!(km >= 0 && km <= ROUTE.totalKm)) continue;
+    // Approximate road direction at the crossing from the world-space
+    // endpoints of this segment — more accurate than the bare track tangent
+    // when the road crosses at a steep angle.
+    const fA = trackFrame(a.km);
+    const fB = trackFrame(b.km);
+    const pA = fA.p.clone().add(fA.r.clone().multiplyScalar(la));
+    const pB = fB.p.clone().add(fB.r.clone().multiplyScalar(lb));
+    const dir = pB.clone().sub(pA);
+    dir.y = 0;
+    if (dir.lengthSq() < 1e-3) continue;
+    dir.normalize();
+    crossings.push({ km, dir });
+  }
+  // Coalesce crossings closer than 40 m together — neighbouring road
+  // segments around the track can land two sign-changes within metres of
+  // each other; rendering both produces visual clutter.
+  crossings.sort((a, b) => a.km - b.km);
+  const merged = [];
+  for (const cr of crossings){
+    if (merged.length && (cr.km - merged[merged.length - 1].km) < 0.04){
+      continue;
+    }
+    merged.push(cr);
+  }
+  if (!merged.length) return group;
+
+  const roadW = 8;
+  const paintMat   = new THREE.MeshBasicMaterial({ color: 0xf2f0ea });
+  const armWhite   = new THREE.MeshBasicMaterial({ color: 0xf2f0ea });
+  const armRed     = new THREE.MeshBasicMaterial({ color: 0xc8302a });
+  const poleMat    = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.6, metalness: 0.25 });
+  const lampMat    = new THREE.MeshBasicMaterial({ color: 0xff3030 });
+
+  const ARM_LENGTH = roadW + 0.6;
+  const ARM_THICK  = 0.32;
+  const NUM_STRIPES = 6;
+  const POST_HEIGHT = 1.6;
+  const POST_SET_BACK = 5.5;          // metres from track centre along road
+  const stripeLen = ARM_LENGTH / NUM_STRIPES;
+
+  for (const cr of merged){
+    const f = trackFrame(cr.km);
+    const baseY = f.p.y + _roadGradeOffset(cr.km, 0) + 0.06;
+    // Road perpendicular in the horizontal plane.
+    const up = new THREE.Vector3(0, 1, 0);
+    const rPerp = new THREE.Vector3().crossVectors(up, cr.dir).normalize();
+    // Yaw that aligns local +X with cr.dir (used for the painted box / stop
+    // bars whose long axis is the road direction).
+    const yawRoad = Math.atan2(cr.dir.z, -cr.dir.x);   // see derivation in buildLevelCrossings comments
+
+    // White painted box over the rail — sits flush on the tarmac. Wider
+    // than the tarmac centreline by 1 m so it's unambiguous it spans the
+    // whole carriageway.
+    const box = new THREE.Mesh(new THREE.PlaneGeometry(4.0, roadW - 0.6), paintMat);
+    box.position.set(f.p.x, baseY + 0.015, f.p.z);
+    box.rotation.x = -Math.PI / 2;
+    box.rotation.z = yawRoad;
+    group.add(box);
+
+    // Stop bars on each side of the rail — narrower painted strips.
+    for (const side of [-1, 1]){
+      const stopCentre = f.p.clone().add(cr.dir.clone().multiplyScalar(side * 7.5));
+      const bar = new THREE.Mesh(new THREE.PlaneGeometry(0.45, roadW - 0.8), paintMat);
+      bar.position.set(stopCentre.x, baseY + 0.03, stopCentre.z);
+      bar.rotation.x = -Math.PI / 2;
+      bar.rotation.z = yawRoad;
+      group.add(bar);
+    }
+
+    // Barriers — one per side of the rail. Post sits at the road's right-
+    // hand edge (rPerp side) and the striped arm extends across the road.
+    // Yaw that aligns local +X with -rPerp (so stripes extend across road).
+    const yawArm = Math.atan2(-rPerp.z, rPerp.x);
+    for (const side of [-1, 1]){
+      const along = cr.dir.clone().multiplyScalar(side * POST_SET_BACK);
+      const acrossPost = rPerp.clone().multiplyScalar(roadW / 2 + 0.5);
+      const postBase = f.p.clone().add(along).add(acrossPost);
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14, 0.16, POST_HEIGHT, 8),
+        poleMat
+      );
+      post.position.set(postBase.x, baseY + POST_HEIGHT / 2, postBase.z);
+      group.add(post);
+
+      // Striped arm — alternating red/white box segments. Local +X aligns
+      // with -rPerp; centre of the arm sits roadW/2 inboard of the post.
+      const armGroup = new THREE.Group();
+      for (let s = 0; s < NUM_STRIPES; s++){
+        const m = (s % 2 === 0) ? armWhite : armRed;
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(stripeLen * 0.95, ARM_THICK, ARM_THICK),
+          m
+        );
+        stripe.position.x = (s - (NUM_STRIPES - 1) / 2) * stripeLen;
+        armGroup.add(stripe);
+      }
+      const armCentre = postBase.clone().add(rPerp.clone().multiplyScalar(-ARM_LENGTH / 2));
+      armGroup.position.set(armCentre.x, baseY + POST_HEIGHT - 0.05, armCentre.z);
+      armGroup.rotation.y = yawArm;
+      group.add(armGroup);
+
+      // Red warning lamp on top of post — small sphere, MeshBasic so it
+      // reads as a glowing aspect in shadow.
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), lampMat);
+      lamp.position.set(postBase.x, baseY + POST_HEIGHT + 0.28, postBase.z);
+      group.add(lamp);
+    }
+  }
+  return group;
+}
+
 function updateTraffic(dt){
   if (!TRAFFIC.cars.length || TRAFFIC.total < 5) return;
   for (const car of TRAFFIC.cars){
@@ -16683,6 +16842,7 @@ function buildWorld(){
   _addWorld(buildHills());
   _addWorld(buildScatter());
   _addWorld(buildRoads());
+  _addWorld(buildLevelCrossings());
   _addWorld(buildLandmarks());
 }
 
