@@ -21030,60 +21030,117 @@ function buildClass91Loco(carLen){
     cabDoorWin.position.set(side * (bodyW / 2 + 0.08), bodyBaseY + 1.55, bodyLen / 2 - 2.40);
     car.add(cabDoorWin);
   }
-  // ==== Sloped cab end — at +Z (rear-facing toward the train when in
-  // push-pull, but cab faces FORWARD on a southbound run) ====
+  // ==== Three-faceted nose: upper slope, flat headlight band, lower slope ====
+  // Profile (viewed from the side, cab facing +Z = right):
+  //
+  //        cab roof
+  //       /          ← upper face slants FORWARD (windscreen here)
+  //      /
+  //     |___          ← flat middle, headlights mounted on this face
+  //         \
+  //          \       ← lower face slants BACK toward the buffer
+  //
+  // Lining up the segments so each face's leading edge meets the next
+  // segment's trailing edge gives a continuous polygon. Tilt sizes set
+  // by upperTilt (positive = top juts forward) and lowerTilt (negative
+  // = top juts back, bottom recedes under the body).
   const bodyFront = bodyLen / 2;
-  const cabNoseW = bodyW * 0.94;
-  const cabNoseH = bodyH * 0.62;
-  const cabNoseD = 1.20;
-  const cabTilt = 0.28;
-  const cabNoseY = bodyBaseY + bodyH * 0.55;
-  // The Class 91 cab is a single sloped streamlined face — distinctive
-  // single windscreen, central pillar, headlamps either side.
-  const cabNose = new THREE.Mesh(roundedBoxGeo(cabNoseW, cabNoseH, cabNoseD, 0.35), wedgeMat);
-  cabNose.position.set(0, cabNoseY, bodyFront + 0.55);
-  cabNose.rotation.x = -cabTilt;
-  car.add(cabNose);
-  // Yellow lower nose
-  const yellowNose = new THREE.Mesh(roundedBoxGeo(cabNoseW * 0.96, 0.65, 0.35, 0.10), yellowMat);
-  yellowNose.position.set(0, bodyBaseY + 0.95, bodyFront + 1.15);
-  yellowNose.rotation.x = -cabTilt;
-  car.add(yellowNose);
-  // Single windscreen on the cab face
+  const cabNoseW = bodyW * 0.96;
+  const upperTilt =  0.34;       // ≈ 19° forward rake — top slope juts forward
+  const lowerTilt = -0.34;       // ≈ 19° back rake — bottom slope recedes
+  const flatZ     = bodyFront + 0.88;        // forward face of the flat band
+  const flatTop   = bodyBaseY + bodyH * 0.62;  // top of flat band
+  const flatBot   = bodyBaseY + bodyH * 0.40;  // bottom of flat band
+  const flatY     = (flatTop + flatBot) / 2;
+  const flatH     = flatTop - flatBot;
+  // === Upper sloping face — windscreen sits on this face ===
+  const upperFaceH = bodyH * 0.46;
+  const upperY     = (bodyBaseY + bodyH + flatTop) / 2;
+  const upperZ     = bodyFront + 0.50;
+  const upperFace = new THREE.Mesh(
+    roundedBoxGeo(cabNoseW, upperFaceH, 0.85, 0.18),
+    wedgeMat
+  );
+  upperFace.position.set(0, upperY, upperZ);
+  upperFace.rotation.x = -upperTilt;
+  car.add(upperFace);
+  // === Flat headlight band — vertical face, sits between the two slopes ===
+  const flatFace = new THREE.Mesh(
+    roundedBoxGeo(cabNoseW, flatH, 0.22, 0.06),
+    wedgeMat
+  );
+  flatFace.position.set(0, flatY, flatZ);
+  car.add(flatFace);
+  // Black painted strip running across the flat band to highlight the
+  // headlight panel against the red body
+  const flatStrip = new THREE.Mesh(
+    new THREE.BoxGeometry(cabNoseW * 0.96, flatH * 0.90, 0.04),
+    trimMat
+  );
+  flatStrip.position.set(0, flatY, flatZ + 0.11);
+  car.add(flatStrip);
+  // === Lower sloping face — yellow safety panel toward the buffer ===
+  const lowerFaceH = (flatBot - bodyBaseY) + 0.30;
+  const lowerY     = (flatBot + bodyBaseY) / 2;
+  const lowerZ     = bodyFront + 0.55;
+  const lowerFace = new THREE.Mesh(
+    roundedBoxGeo(cabNoseW * 0.92, lowerFaceH, 0.85, 0.15),
+    yellowMat
+  );
+  lowerFace.position.set(0, lowerY, lowerZ);
+  lowerFace.rotation.x = -lowerTilt;
+  car.add(lowerFace);
+  // === Windscreen on the upper sloping face ===
   const ws91Mat = new THREE.MeshStandardMaterial({ color: 0x0a1422, metalness: 0.1, roughness: 0.18 });
-  const ws91 = new THREE.Mesh(new THREE.PlaneGeometry(1.95, 0.85), ws91Mat);
-  ws91.position.set(0, bodyBaseY + bodyH * 0.85, bodyFront + 1.05);
-  ws91.rotation.x = -cabTilt;
-  car.add(ws91);
-  // Centre pillar
-  const ws91Mul = new THREE.Mesh(new THREE.PlaneGeometry(0.10, 0.85), trimMat);
-  ws91Mul.position.set(0, bodyBaseY + bodyH * 0.85, bodyFront + 1.054);
-  ws91Mul.rotation.x = -cabTilt;
-  car.add(ws91Mul);
-  // Black bezel around the windscreen
   const ws91Bezel = new THREE.Mesh(new THREE.PlaneGeometry(2.10, 1.00), trimMat);
-  ws91Bezel.position.set(0, bodyBaseY + bodyH * 0.85, bodyFront + 1.046);
-  ws91Bezel.rotation.x = -cabTilt;
+  ws91Bezel.position.set(0, upperY + 0.10, upperZ + Math.sin(upperTilt) * 0.10 + 0.46);
+  ws91Bezel.rotation.x = -upperTilt;
   car.add(ws91Bezel);
-  // Two headlamps on the upper nose flanks
+  const ws91 = new THREE.Mesh(new THREE.PlaneGeometry(1.95, 0.85), ws91Mat);
+  ws91.position.set(0, upperY + 0.10, upperZ + Math.sin(upperTilt) * 0.10 + 0.47);
+  ws91.rotation.x = -upperTilt;
+  car.add(ws91);
+  // Centre pillar splitting the windscreen
+  const ws91Mul = new THREE.Mesh(new THREE.PlaneGeometry(0.10, 0.85), trimMat);
+  ws91Mul.position.set(0, upperY + 0.10, upperZ + Math.sin(upperTilt) * 0.10 + 0.475);
+  ws91Mul.rotation.x = -upperTilt;
+  car.add(ws91Mul);
+  // === Headlights — mounted FLAT on the flat band, facing forward ===
   const lampMat = new THREE.MeshStandardMaterial({
     color: 0xfff8d8, emissive: 0xffeec0, emissiveIntensity: 0.85, roughness: 0.3,
   });
+  const markerMat = new THREE.MeshStandardMaterial({
+    color: 0xfffae0, emissive: 0xffeeaa, emissiveIntensity: 0.40, roughness: 0.3,
+  });
+  // Two main headlamps + two marker lamps in a row across the flat band.
+  // Positioned so they sit on the FLAT face (no tilt) for that recognisable
+  // headlight-strip look — the lamps face cleanly forward, not skewed by a
+  // nose slope.
   for (const sx of [-0.95, 0.95]){
-    const bezel = new THREE.Mesh(roundedBoxGeo(0.30, 0.16, 0.06, 0.03), trimMat);
-    bezel.position.set(sx, bodyBaseY + bodyH * 0.60, bodyFront + 1.05);
-    bezel.rotation.x = -cabTilt;
+    const bezel = new THREE.Mesh(roundedBoxGeo(0.34, flatH * 0.65, 0.06, 0.04), trimMat);
+    bezel.position.set(sx, flatY, flatZ + 0.13);
     car.add(bezel);
-    const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 12), lampMat);
-    lamp.position.set(sx, bodyBaseY + bodyH * 0.60, bodyFront + 1.07);
-    lamp.rotation.x = Math.PI / 2 - cabTilt;
-    car.add(lamp);
+    // Main beam (upper lamp)
+    const main = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.04, 14), lampMat);
+    main.position.set(sx, flatY + 0.04, flatZ + 0.16);
+    main.rotation.x = Math.PI / 2;
+    car.add(main);
+    // Position light (lower lamp)
+    const pos = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12), markerMat);
+    pos.position.set(sx, flatY - 0.08, flatZ + 0.16);
+    pos.rotation.x = Math.PI / 2;
+    car.add(pos);
   }
-  // Wipers
+  // Centre warning lamp on the flat band (BR / network rail style)
+  const centreWarn = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.04, 14), markerMat);
+  centreWarn.position.set(0, flatY + 0.04, flatZ + 0.16);
+  centreWarn.rotation.x = Math.PI / 2;
+  car.add(centreWarn);
+  // Wipers — sit on the upper sloping face
   for (const sx of [-0.50, 0.50]){
     const wiper = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.65, 0.02), trimMat);
-    wiper.position.set(sx, bodyBaseY + bodyH * 0.78, bodyFront + 1.08);
-    wiper.rotation.x = -cabTilt;
+    wiper.position.set(sx, upperY + 0.10, upperZ + Math.sin(upperTilt) * 0.10 + 0.48);
+    wiper.rotation.x = -upperTilt;
     wiper.rotation.z = sx < 0 ? -0.20 : 0.20;
     car.add(wiper);
   }
