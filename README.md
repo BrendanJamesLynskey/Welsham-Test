@@ -11,6 +11,12 @@ sat behind a password so casual visitors don't land on a half-broken build.
 — record station announcements and security messages into audio files
 for import into the sim.
 
+[Train designer](https://brendanjameslynskey.github.io/Welsham-Test/designer.html)
+— Tinkercad-style 3D sandbox for assembling train shells from primitive
+shapes. Drop in bogies, body blocks, wedges, cylinders, windows,
+pantographs; tweak every part's size, position and colour; export the
+design as JSON for import back into the sim.
+
 ## Access
 
 The sim is gated by an access code on first load. Type it into the prompt
