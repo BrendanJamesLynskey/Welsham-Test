@@ -149,6 +149,28 @@ button,input,select{font:inherit;color:inherit;}
         <div class="sw" style="background:linear-gradient(135deg,#404040,#1a1a1a);color:#a8b0c0;">⩠</div>
         <div><div class="nm">Pantograph</div><div class="sub">Roof-mounted</div></div>
       </div>
+      <div class="pTile" data-add="buffer">
+        <div class="sw" style="background:radial-gradient(circle,#cfd4dc 32%,#404048 60%,#101014 100%);">●</div>
+        <div><div class="nm">Buffer</div><div class="sub">Coupling buffer</div></div>
+      </div>
+
+      <h2>Paint shapes</h2>
+      <div class="pTile" data-add="paintRect">
+        <div class="sw" style="background:linear-gradient(135deg,#c62828,#801818);color:#fff;">▭</div>
+        <div><div class="nm">Paint rect</div><div class="sub">Plate / panel</div></div>
+      </div>
+      <div class="pTile" data-add="paintCircle">
+        <div class="sw" style="background:radial-gradient(circle,#5cc8ff 40%,#205070 100%);color:#fff;">●</div>
+        <div><div class="nm">Paint circle</div><div class="sub">Logo / roundel</div></div>
+      </div>
+      <div class="pTile" data-add="paintTri">
+        <div class="sw" style="background:linear-gradient(135deg,#ffd23a,#806010);color:#403018;clip-path:polygon(50% 0,100% 100%,0 100%);">▲</div>
+        <div><div class="nm">Paint triangle</div><div class="sub">Chevron / warning</div></div>
+      </div>
+      <div class="pTile" data-add="paintStripe">
+        <div class="sw" style="background:linear-gradient(180deg,#c62828 33%,#f0e8d0 33%,#f0e8d0 66%,#205070 66%);color:#fff;">━</div>
+        <div><div class="nm">Paint stripe</div><div class="sub">Livery band</div></div>
+      </div>
     </aside>
 
     <div id="canvasWrap">
@@ -455,6 +477,83 @@ function buildPartMesh(p){
   else if (p.kind === 'bogie' || p.kind === 'bogieJ'){
     g.add(buildBogie(p));
   }
+  else if (p.kind === 'buffer'){
+    // UK-style centre / side buffer: chunky cylindrical shaft projecting
+    // forward (along +Z) with a polished steel disc head at the tip. The
+    // shaft uses the body colour; the head is bright silver so it reads
+    // against either red, blue or green livery. Place two side-by-side
+    // (use Mirror X on the first to get the pair instantly).
+    const shaftR = p.w / 2;
+    const shaftL = p.d;
+    const headR = Math.max(shaftR * 1.32, p.h / 2);
+    const shaftMat = _mat(col, { metalness: 0.30, roughness: 0.55 });
+    const headMat = _mat(0xcfd4dc, { metalness: 0.55, roughness: 0.30 });
+    // Mounting flange against the body
+    const flange = new THREE.Mesh(
+      new THREE.CylinderGeometry(shaftR * 1.4, shaftR * 1.4, 0.06, 16),
+      _mat(0x14171a, { roughness: 0.6 })
+    );
+    flange.rotation.x = Math.PI / 2;
+    flange.position.z = -shaftL / 2 + 0.02;
+    g.add(flange);
+    // Shaft
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(shaftR, shaftR, shaftL, 18),
+      shaftMat
+    );
+    shaft.rotation.x = Math.PI / 2;
+    g.add(shaft);
+    // Polished head disc — slightly domed (cone + cylinder)
+    const head = new THREE.Mesh(
+      new THREE.CylinderGeometry(headR, headR, 0.05, 22),
+      headMat
+    );
+    head.rotation.x = Math.PI / 2;
+    head.position.z = shaftL / 2 + 0.025;
+    g.add(head);
+    // Rounded forward face on the head — small cone for the buffing surface
+    const dome = new THREE.Mesh(
+      new THREE.CylinderGeometry(headR * 0.92, headR, 0.04, 22),
+      headMat
+    );
+    dome.rotation.x = Math.PI / 2;
+    dome.position.z = shaftL / 2 + 0.065;
+    g.add(dome);
+  }
+  else if (p.kind === 'paintRect'){
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), _paintMat(col)));
+  }
+  else if (p.kind === 'paintCircle'){
+    // Thin disc — CylinderGeometry rotated so the face plane lies in XY
+    // (axis along +Z). DoubleSide so it reads regardless of viewing angle.
+    const r = Math.min(p.w, p.h) / 2;
+    const disc = new THREE.Mesh(
+      new THREE.CylinderGeometry(r, r, p.d, 28),
+      _paintMat(col)
+    );
+    disc.rotation.x = Math.PI / 2;
+    // Scale X/Z so the disc can be made elliptical via separate w/h.
+    if (p.w !== p.h) disc.scale.set(p.w / (2 * r), 1, p.h / (2 * r));
+    g.add(disc);
+  }
+  else if (p.kind === 'paintTri'){
+    // Re-use the triangleGeometry helper from the triangle window, but
+    // extrude it slightly along Z by stacking a thin BoxGeometry behind it
+    // so the paint has a visible thickness from grazing angles.
+    const front = new THREE.Mesh(triangleGeometry(p.w, p.h, p.apex || 0), _paintMat(col));
+    front.position.z = p.d / 2;
+    g.add(front);
+    const back = new THREE.Mesh(triangleGeometry(p.w, p.h, p.apex || 0), _paintMat(col));
+    back.position.z = -p.d / 2;
+    back.rotation.y = Math.PI;
+    g.add(back);
+  }
+  else if (p.kind === 'paintStripe'){
+    // Long thin painted band — typically used for livery stripes running
+    // along the side of the body. Identical to paintRect but the defaults
+    // make it long-and-thin out of the box.
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), _paintMat(col)));
+  }
   // Apply transform — the part's world transform lives on the wrapper Group.
   return g;
 }
@@ -589,6 +688,18 @@ function _glassMat(col){
   });
 }
 
+// Paint material — flat matte finish for surface decals (number plates,
+// livery stripes, logos). DoubleSide so a paint patch reads from both
+// sides if the user mounts it through a body.
+function _paintMat(col){
+  return new THREE.MeshStandardMaterial({
+    color: col,
+    roughness: 0.85,
+    metalness: 0.04,
+    side: THREE.DoubleSide,
+  });
+}
+
 // Planar triangle with corners at top-centre (with optional apex X offset
 // for leaning windows), bottom-left and bottom-right. Wound CCW from +Z
 // so the textured side faces forward; DoubleSide handles the back view.
@@ -657,6 +768,11 @@ const DEFAULTS = {
   winstrip:   { w: 0.08, h: 0.85, d: 8.0, color: '#0c1422', count: 9 },
   triwin:     { w: 1.20, h: 1.10, d: 0.06, color: '#0c1422', apex: 0.30 },
   grill:      { w: 1.40, h: 0.45, d: 0.12, color: '#3a3a3e', count: 7 },
+  buffer:     { w: 0.20, h: 0.36, d: 0.32, color: '#3a3a3e' },
+  paintRect:  { w: 0.45, h: 0.18, d: 0.02, color: '#c62828' },
+  paintCircle:{ w: 0.30, h: 0.30, d: 0.02, color: '#5cc8ff' },
+  paintTri:   { w: 0.30, h: 0.26, d: 0.02, color: '#ffd23a', apex: 0 },
+  paintStripe:{ w: 8.00, h: 0.18, d: 0.02, color: '#c62828' },
   door:       { w: 0.08, h: 2.05, d: 1.25, color: '#9ec5e8' },
   headlight:  { w: 0.22, h: 0.22, d: 0.10, color: '#fff5d8' },
   pantograph: { w: 1.6, h: 2.5, d: 0.8, color: '#383b40' },
@@ -684,6 +800,11 @@ function addPart(kind, atFront){
   if (kind === 'headlight') y = 1.8;
   if (kind === 'pantograph') y = 3.0;
   if (kind === 'roof') y = 2.95;
+  if (kind === 'buffer'){ y = 1.0; x = 1.0; }
+  if (kind === 'paintRect') y = 1.5;
+  if (kind === 'paintCircle') y = 2.0;
+  if (kind === 'paintTri') y = 2.0;
+  if (kind === 'paintStripe'){ y = 2.4; x = 1.45; }
   // Step new parts to the right of existing ones so they don't all stack
   if (M.parts.length){
     const xs = M.parts.map(p => p.x + p.d / 2);
