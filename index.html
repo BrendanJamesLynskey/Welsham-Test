@@ -21046,13 +21046,18 @@ function getRoutes(map){ return (map && Array.isArray(map.routes)) ? map.routes 
 // Resolve the map's preferred starting route. The editor emits the named
 // route via the top-level `defaultRoute` field — if that matches one of the
 // routes, return its index; otherwise -1 (the synthetic "Full route" entry).
+// For user-uploaded maps with at least one route, -1 collapses to 0 because
+// the "Full route" option is dropped from the dropdown (the map author's
+// patterns are the only callable services).
 function defaultRouteIdx(map){
-  if (!map || !map.defaultRoute) return -1;
   const routes = getRoutes(map);
-  const target = String(map.defaultRoute).trim();
-  for (let i = 0; i < routes.length; i++){
-    if ((routes[i].name || '').trim() === target) return i;
+  if (map && map.defaultRoute){
+    const target = String(map.defaultRoute).trim();
+    for (let i = 0; i < routes.length; i++){
+      if ((routes[i].name || '').trim() === target) return i;
+    }
   }
+  if (map && map._userLoaded && routes.length > 0) return 0;
   return -1;
 }
 function _snapshotOrig(map){
@@ -21101,14 +21106,20 @@ function rebuildRouteSelect(){
   }
   row.style.display = 'flex';
   hdr.style.display = 'block';
-  const opts = ['<option value="-1">Full route — all stops</option>'];
+  // User-uploaded maps with their own routes restrict the player to those
+  // routes — the synthetic "Full route — all stops" entry is dropped so the
+  // map author's service patterns are the only callable options. Bundled
+  // maps keep the full-route fallback for parity with the parent sim.
+  const lockToRoutes = !!(ROUTE._userLoaded && routes.length);
+  const opts = lockToRoutes ? [] : ['<option value="-1">Full route — all stops</option>'];
   routes.forEach((r, i) => {
     const code = (r.code ? r.code + ' · ' : '');
     const n = (r.stations || []).length;
     opts.push(`<option value="${i}">${code}${escapeHtmlForOption(r.name || 'Route ' + (i+1))} (${n} stops)</option>`);
   });
   sel.innerHTML = opts.join('');
-  const activeIdx = (ROUTE._activeRouteIdx != null) ? ROUTE._activeRouteIdx : -1;
+  let activeIdx = (ROUTE._activeRouteIdx != null) ? ROUTE._activeRouteIdx : -1;
+  if (lockToRoutes && activeIdx < 0) activeIdx = 0;
   sel.value = String(activeIdx);
   const totalStops = ROUTE.stations.length;
   meta.textContent = totalStops + ' stop' + (totalStops === 1 ? '' : 's') + ' · ' + ROUTE.totalKm.toFixed(1) + ' km';
@@ -21266,6 +21277,10 @@ function installLoadedMap(json, sourceLabel){
   json.biome = json.biome || 'countryside';
   json.service = json.service || ('LOADED ' + json.stations[0].code + ' → ' + json.stations[json.stations.length-1].code);
   const replacing = !!MAPS[json.key];
+  // Mark user-uploaded maps so the route picker can lock the player onto
+  // the routes the author defined — see rebuildRouteSelect for the
+  // suppression of the synthetic "Full route" entry.
+  json._userLoaded = true;
   MAPS[json.key] = json;
   buildMapList();
   selectMap(json.key);
