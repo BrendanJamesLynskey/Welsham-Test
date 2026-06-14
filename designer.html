@@ -176,7 +176,7 @@ button,input,select{font:inherit;color:inherit;}
     <div id="canvasWrap">
       <canvas id="canvas"></canvas>
       <div class="hint">
-        <b>CLICK</b> palette to add · <b>CLICK</b> part to select · <b>DRAG RMB</b> to orbit · <b>WHEEL</b> to zoom · <b>DEL</b> to delete
+        <b>CLICK</b> palette to add · <b>CLICK</b> part to select · <b>DRAG RMB</b> to orbit · <b>WHEEL</b> to zoom · <b>⌘C</b>/<b>⌘V</b> copy/paste · <b>DEL</b> to delete
       </div>
       <div class="viewBadge" id="viewBadge">3D PERSPECTIVE</div>
     </div>
@@ -917,6 +917,21 @@ window.addEventListener('keydown', ev => {
   if ((ev.key === 'Delete' || ev.key === 'Backspace') && selectedId){
     deletePart(selectedId);
     ev.preventDefault();
+    return;
+  }
+  // Cmd/Ctrl + C / V — copy / paste the selected part. Tied to the same
+  // selectedId logic so the shortcut only fires when something is selected
+  // (or, for paste, when the clipboard has content).
+  const mod = ev.metaKey || ev.ctrlKey;
+  if (mod && ev.key.toLowerCase() === 'c' && selectedId){
+    const p = M.parts.find(q => q.id === selectedId);
+    if (p){ copyPart(p); ev.preventDefault(); }
+    return;
+  }
+  if (mod && ev.key.toLowerCase() === 'v'){
+    pastePart();
+    ev.preventDefault();
+    return;
   }
 });
 
@@ -987,6 +1002,11 @@ function refreshSidebar(){
         <button data-mirror="y" style="width:auto;">Mirror Y</button>
         <button data-mirror="z" style="width:auto;">Mirror Z</button>
       </div>
+      <h2>Copy / paste</h2>
+      <div class="grid2" style="gap:0.32rem;">
+        <button id="btnCopy" style="width:auto;">Copy (⌘C)</button>
+        <button id="btnPaste" style="width:auto;">Paste (⌘V)</button>
+      </div>
       <button class="danger" id="btnDelete">Delete part</button>
     `;
     propsEl.querySelectorAll('input[data-k]').forEach(inp => {
@@ -1008,10 +1028,45 @@ function refreshSidebar(){
     propsEl.querySelectorAll('button[data-mirror]').forEach(btn => {
       btn.addEventListener('click', () => mirrorPart(p, btn.dataset.mirror));
     });
+    const copyBtn = propsEl.querySelector('#btnCopy');
+    if (copyBtn) copyBtn.addEventListener('click', () => copyPart(p));
+    const pasteBtn = propsEl.querySelector('#btnPaste');
+    if (pasteBtn) pasteBtn.addEventListener('click', () => pastePart());
     const del = propsEl.querySelector('#btnDelete');
     if (del) del.addEventListener('click', () => deletePart(p.id));
   }
   refreshPartList();
+}
+
+// Clipboard for copy / paste. Stores a stripped snapshot of the part data
+// — never the live three.js object — so the original can be edited or
+// deleted between copy and paste without breaking the buffer.
+let clipboard = null;
+function copyPart(src){
+  if (!src) return;
+  const snap = { ...src };
+  delete snap._obj;
+  delete snap.id;
+  clipboard = snap;
+  msg('Copied ' + src.kind, 'ok');
+}
+function pastePart(){
+  if (!clipboard){ msg('Clipboard empty', 'warn'); return; }
+  const p = { ...clipboard, id: uid() };
+  // Offset the paste a touch along Z (a half-depth, so the new part
+  // doesn't overlap the original at the same coordinates), then push the
+  // clipboard's anchor forward by the same amount so successive Ctrl+V
+  // presses spread out in a row instead of stacking on top of each other.
+  const step = Math.max(0.5, p.d * 0.6);
+  p.z = (clipboard.z || 0) + step;
+  clipboard.z = p.z;
+  M.parts.push(p);
+  rebuildPart(p);
+  selectedId = p.id;
+  syncOutline();
+  refreshSidebar();
+  updateStats();
+  msg('Pasted ' + p.kind, 'ok');
 }
 
 // Mirror the selected part across one of the three world axes. Position is
