@@ -476,10 +476,12 @@ function roundedBoxGeometry(w, h, d, r){
 function wedgeGeometry(w, h, d, tilt){
   // A box that's been tapered — front face's TOP edge is pulled back
   // by `tilt × h` so the leading face slopes. Built directly as a
-  // BufferGeometry from 8 explicit corner vertices.
+  // BufferGeometry from 8 explicit corner vertices. Triangle winding
+  // is counter-clockwise when viewed from OUTSIDE each face so the
+  // computed normals all point outward and three.js's back-face
+  // culling keeps every wall opaque from every angle.
   const x = w / 2, y = h / 2, z = d / 2;
   const shift = Math.min(d * 0.6, h * tilt);
-  // Bottom corners (full forward)
   const v = [
     -x, -y, -z,   // 0  back-bottom-left
      x, -y, -z,   // 1  back-bottom-right
@@ -491,12 +493,12 @@ function wedgeGeometry(w, h, d, tilt){
     -x,  y,  z - shift,   // 7  front-top-left (pulled back)
   ];
   const idx = [
-    0, 2, 1,  0, 3, 2,    // bottom
-    4, 5, 6,  4, 6, 7,    // top
-    0, 1, 5,  0, 5, 4,    // back
-    2, 3, 7,  2, 7, 6,    // front (sloped)
-    1, 2, 6,  1, 6, 5,    // right
-    0, 4, 7,  0, 7, 3,    // left
+    0, 1, 2,  0, 2, 3,    // bottom  (-Y normal)
+    4, 7, 6,  4, 6, 5,    // top     (+Y normal)
+    0, 4, 5,  0, 5, 1,    // back    (-Z normal)
+    3, 2, 6,  3, 6, 7,    // front   (sloped, mostly +Z +Y)
+    1, 5, 6,  1, 6, 2,    // right   (+X normal)
+    0, 3, 7,  0, 7, 4,    // left    (-X normal)
   ];
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
