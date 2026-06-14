@@ -123,7 +123,11 @@ button,input,select{font:inherit;color:inherit;}
       <h2>Details</h2>
       <div class="pTile" data-add="window">
         <div class="sw" style="background:linear-gradient(135deg,#1a2840,#0a1422);color:#5090c8;">▨</div>
-        <div><div class="nm">Window</div><div class="sub">Dark glass strip</div></div>
+        <div><div class="nm">Window</div><div class="sub">Single pane</div></div>
+      </div>
+      <div class="pTile" data-add="winstrip">
+        <div class="sw" style="background:linear-gradient(135deg,#1a2840,#0a1422);color:#5090c8;border:1px solid #5090c8;">▦</div>
+        <div><div class="nm">Window strip</div><div class="sub">Multi-pane row</div></div>
       </div>
       <div class="pTile" data-add="door">
         <div class="sw" style="background:linear-gradient(135deg,#c0d8f0,#608090);color:#202830;">⊟</div>
@@ -317,6 +321,35 @@ function buildPartMesh(p){
       new THREE.BoxGeometry(p.w, p.h, p.d),
       _mat(col, { roughness: 0.15, metalness: 0.35 })
     ));
+  }
+  else if (p.kind === 'winstrip'){
+    // Multi-pane window strip — N small dark panes along the part's Z axis,
+    // with thin trim separators between them and around the perimeter. Reads
+    // as a row of coach windows from any viewing angle.
+    const count = Math.max(1, Math.min(40, Math.round(p.count || 6)));
+    const gap = Math.min(0.06, p.d / (count * 6));
+    const paneZ = (p.d - gap * (count + 1)) / count;
+    const trimMat = _mat(0x14171a, { roughness: 0.5 });
+    const glassMat = _mat(col, { roughness: 0.15, metalness: 0.35 });
+    // Backing dark trim — covers the whole strip area, slightly inset
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(p.w * 0.96, p.h * 1.06, p.d), trimMat));
+    // Panes
+    for (let k = 0; k < count; k++){
+      const z = -p.d / 2 + gap + paneZ / 2 + k * (paneZ + gap);
+      const pane = new THREE.Mesh(
+        new THREE.BoxGeometry(p.w, p.h, paneZ),
+        glassMat
+      );
+      pane.position.z = z;
+      g.add(pane);
+    }
+    // Top and bottom rails of the strip — slim chrome bezel
+    const bezelMat = _mat(0xb0b4ba, { metalness: 0.45, roughness: 0.30 });
+    for (const dy of [+p.h / 2 + 0.04, -p.h / 2 - 0.04]){
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(p.w * 1.02, 0.06, p.d + 0.04), bezelMat);
+      rail.position.y = dy;
+      g.add(rail);
+    }
   }
   else if (p.kind === 'door'){
     const body = new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), _mat(col));
@@ -519,6 +552,7 @@ const DEFAULTS = {
   cyl:        { w: 1.4, h: 4.0, d: 1.4, color: '#5070a8' },
   roof:       { w: 2.7, h: 0.18, d: 6.0, color: '#404048' },
   window:     { w: 2.85, h: 0.85, d: 0.06, color: '#0c1422' },
+  winstrip:   { w: 0.08, h: 0.85, d: 8.0, color: '#0c1422', count: 9 },
   door:       { w: 0.08, h: 2.05, d: 1.25, color: '#9ec5e8' },
   headlight:  { w: 0.22, h: 0.22, d: 0.10, color: '#fff5d8' },
   pantograph: { w: 1.6, h: 2.5, d: 0.8, color: '#383b40' },
@@ -535,6 +569,11 @@ function addPart(kind, atFront){
   let x = 0, y = 1.5, z = 0;
   if (kind === 'bogie' || kind === 'bogieJ') y = 0;
   if (kind === 'window') y = 2.4;
+  if (kind === 'winstrip'){
+    // Window strips sit on the side of the body; default to the right (+X)
+    // side at upper-body height so they're visible from outside.
+    y = 2.3; x = 1.45;
+  }
   if (kind === 'door') y = 1.4;
   if (kind === 'headlight') y = 1.8;
   if (kind === 'pantograph') y = 3.0;
@@ -552,6 +591,7 @@ function addPart(kind, atFront){
     color: def.color,
   };
   if (def.tilt !== undefined) p.tilt = def.tilt;
+  if (def.count !== undefined) p.count = def.count;
   M.parts.push(p);
   rebuildPart(p);
   selectedId = p.id;
@@ -682,6 +722,9 @@ function refreshSidebar(){
     const tiltRow = (p.tilt !== undefined)
       ? `<label>Tilt (front slope) <input data-k="tilt" type="number" step="0.05" value="${fmt(p.tilt)}"></label>`
       : '';
+    const countRow = (p.count !== undefined)
+      ? `<label>Panes <input data-k="count" type="number" step="1" min="1" max="40" value="${Math.round(p.count)}"></label>`
+      : '';
     propsEl.innerHTML = `
       <label>Kind <input type="text" value="${p.kind}" disabled></label>
       <h2>Size</h2>
@@ -691,6 +734,7 @@ function refreshSidebar(){
         <label>Depth <input data-k="d" type="number" step="0.05" min="0.05" value="${fmt(p.d)}"></label>
       </div>
       ${tiltRow}
+      ${countRow}
       <h2>Position</h2>
       <div class="grid3">
         <label>X (side) <input data-k="x" type="number" step="0.1" value="${fmt(p.x)}"></label>
@@ -705,6 +749,12 @@ function refreshSidebar(){
       </div>
       <h2>Colour</h2>
       <label><input data-k="color" type="color" value="${p.color}"></label>
+      <h2>Mirror</h2>
+      <div class="grid3" style="gap:0.32rem;">
+        <button data-mirror="x" style="width:auto;">Mirror X</button>
+        <button data-mirror="y" style="width:auto;">Mirror Y</button>
+        <button data-mirror="z" style="width:auto;">Mirror Z</button>
+      </div>
       <button class="danger" id="btnDelete">Delete part</button>
     `;
     propsEl.querySelectorAll('input[data-k]').forEach(inp => {
@@ -723,10 +773,44 @@ function refreshSidebar(){
         refreshPartList();
       });
     });
+    propsEl.querySelectorAll('button[data-mirror]').forEach(btn => {
+      btn.addEventListener('click', () => mirrorPart(p, btn.dataset.mirror));
+    });
     const del = propsEl.querySelector('#btnDelete');
     if (del) del.addEventListener('click', () => deletePart(p.id));
   }
   refreshPartList();
+}
+
+// Mirror the selected part across one of the three world axes. Position is
+// negated on the chosen axis, and any rotation on the OTHER two axes is
+// also flipped so a mirrored-then-rotated part looks like a true reflection
+// (right-hand thread becomes left-hand thread, etc.). The original stays
+// where it is — mirroring always produces a new sibling part.
+function mirrorPart(src, axis){
+  const clone = { ...src };
+  delete clone._obj;
+  clone.id = uid();
+  if (axis === 'x'){
+    clone.x = -src.x;
+    clone.ry = -src.ry;
+    clone.rz = -src.rz;
+  } else if (axis === 'y'){
+    clone.y = -src.y;
+    clone.rx = -src.rx;
+    clone.rz = -src.rz;
+  } else if (axis === 'z'){
+    clone.z = -src.z;
+    clone.rx = -src.rx;
+    clone.ry = -src.ry;
+  }
+  M.parts.push(clone);
+  rebuildPart(clone);
+  selectedId = clone.id;
+  syncOutline();
+  refreshSidebar();
+  updateStats();
+  msg('Mirrored on ' + axis.toUpperCase(), 'ok');
 }
 function refreshPartList(){
   partListEl.innerHTML = '';
@@ -806,6 +890,7 @@ function exportDesign(){
         color: p.color,
       };
       if (p.tilt !== undefined) o.tilt = +p.tilt.toFixed(3);
+      if (p.count !== undefined) o.count = Math.round(p.count);
       return o;
     }),
   };
@@ -826,6 +911,7 @@ function importDesign(json){
       color: raw.color || def.color,
     };
     if (raw.tilt !== undefined) p.tilt = raw.tilt;
+    if (raw.count !== undefined) p.count = raw.count;
     M.parts.push(p);
     rebuildPart(p);
   }
