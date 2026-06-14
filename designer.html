@@ -129,6 +129,14 @@ button,input,select{font:inherit;color:inherit;}
         <div class="sw" style="background:linear-gradient(135deg,#1a2840,#0a1422);color:#5090c8;border:1px solid #5090c8;">▦</div>
         <div><div class="nm">Window strip</div><div class="sub">Multi-pane row</div></div>
       </div>
+      <div class="pTile" data-add="triwin">
+        <div class="sw" style="background:linear-gradient(135deg,#1a2840,#0a1422);color:#5090c8;clip-path:polygon(50% 0,100% 100%,0 100%);">▲</div>
+        <div><div class="nm">Triangle window</div><div class="sub">Class 91-style</div></div>
+      </div>
+      <div class="pTile" data-add="grill">
+        <div class="sw" style="background:repeating-linear-gradient(180deg,#1a1a1c 0,#1a1a1c 4px,#3a3a3e 4px,#3a3a3e 6px);color:#cfe6f7;">▤</div>
+        <div><div class="nm">Grill</div><div class="sub">Louvre slats</div></div>
+      </div>
       <div class="pTile" data-add="door">
         <div class="sw" style="background:linear-gradient(135deg,#c0d8f0,#608090);color:#202830;">⊟</div>
         <div><div class="nm">Door</div><div class="sub">Sliding panel</div></div>
@@ -322,6 +330,69 @@ function buildPartMesh(p){
       _mat(col, { roughness: 0.15, metalness: 0.35 })
     ));
   }
+  else if (p.kind === 'triwin'){
+    // Planar triangular pane with editable apex offset — defaults to point
+    // straight up, but the apex X can slide so the triangle leans left or
+    // right (Class 91 cab windscreens have a noticeable lean). DoubleSide
+    // so the glass reads from both inside and outside the cab.
+    g.add(new THREE.Mesh(triangleGeometry(p.w, p.h, p.apex || 0), _glassMat(col)));
+    // Black rubber gasket around the perimeter — three thin boxes traced
+    // along each edge make the pane look set INTO a frame rather than
+    // floating in space.
+    const trimMat = _mat(0x14171a, { roughness: 0.5 });
+    const cx = (p.apex || 0);
+    const corners = [
+      [cx,       p.h / 2,  0],   // top
+      [-p.w / 2, -p.h / 2, 0],   // bot-left
+      [ p.w / 2, -p.h / 2, 0],   // bot-right
+    ];
+    for (let k = 0; k < 3; k++){
+      const a = corners[k], b = corners[(k + 1) % 3];
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      const ex = b[0] - a[0], ey = b[1] - a[1];
+      const len = Math.hypot(ex, ey);
+      const ang = Math.atan2(ey, ex);
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(len + 0.05, 0.05, 0.04), trimMat);
+      edge.position.set(mx, my, 0.005);
+      edge.rotation.z = ang;
+      g.add(edge);
+    }
+  }
+  else if (p.kind === 'grill'){
+    // Louvred grille — a recessed dark backing panel with N horizontal
+    // slats in front. The slats are tilted slightly forward so they cast
+    // visible shadows on each other, giving the venting depth. Reads as a
+    // cab-front grille on UK locos (the band between the headlights).
+    const count = Math.max(1, Math.min(40, Math.round(p.count || 6)));
+    const backMat = _mat(0x0e1014, { roughness: 0.7 });
+    const slatMat = _mat(col, { roughness: 0.5, metalness: 0.2 });
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d * 0.6), backMat));
+    // Frame around the recess so the grille has a visible border
+    const frameMat = _mat(0x16181a, { roughness: 0.55, metalness: 0.15 });
+    for (const dy of [+p.h / 2 + 0.03, -p.h / 2 - 0.03]){
+      const fr = new THREE.Mesh(new THREE.BoxGeometry(p.w + 0.08, 0.06, p.d), frameMat);
+      fr.position.y = dy;
+      g.add(fr);
+    }
+    for (const dx of [+p.w / 2 + 0.03, -p.w / 2 - 0.03]){
+      const fr = new THREE.Mesh(new THREE.BoxGeometry(0.06, p.h + 0.12, p.d), frameMat);
+      fr.position.x = dx;
+      g.add(fr);
+    }
+    // Slats — count horizontal bars stacked vertically
+    const span = p.h * 0.92;
+    const slatH = span / count * 0.78;
+    for (let k = 0; k < count; k++){
+      const y = -span / 2 + span * (k + 0.5) / count;
+      const slat = new THREE.Mesh(
+        new THREE.BoxGeometry(p.w * 0.95, slatH, p.d * 0.5),
+        slatMat
+      );
+      slat.position.set(0, y, p.d * 0.18);
+      slat.rotation.x = 0.18;
+      g.add(slat);
+    }
+  }
   else if (p.kind === 'winstrip'){
     // Multi-pane window strip — N small dark panes along the part's Z axis,
     // with thin trim separators between them and around the perimeter. Reads
@@ -506,6 +577,37 @@ function roundedBoxGeometry(w, h, d, r){
   return new THREE.BoxGeometry(w, h, d);
 }
 
+// Glass material — dark, slightly reflective, double-sided so the pane
+// reads when the camera passes behind it (Class 91 cab windows are often
+// seen from both the driver's view and from outside the loco).
+function _glassMat(col){
+  return new THREE.MeshStandardMaterial({
+    color: col,
+    roughness: 0.18,
+    metalness: 0.35,
+    side: THREE.DoubleSide,
+  });
+}
+
+// Planar triangle with corners at top-centre (with optional apex X offset
+// for leaning windows), bottom-left and bottom-right. Wound CCW from +Z
+// so the textured side faces forward; DoubleSide handles the back view.
+function triangleGeometry(w, h, apex){
+  const x = w / 2, y = h / 2;
+  const ax = apex || 0;
+  const v = [
+     ax,  y, 0,    // 0  top  (with apex offset)
+    -x, -y, 0,    // 1  bot-left
+     x, -y, 0,    // 2  bot-right
+  ];
+  const idx = [0, 1, 2];
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function wedgeGeometry(w, h, d, tilt){
   // A box that's been tapered — front face's TOP edge is pulled back
   // by `tilt × h` so the leading face slopes. Built directly as a
@@ -553,6 +655,8 @@ const DEFAULTS = {
   roof:       { w: 2.7, h: 0.18, d: 6.0, color: '#404048' },
   window:     { w: 2.85, h: 0.85, d: 0.06, color: '#0c1422' },
   winstrip:   { w: 0.08, h: 0.85, d: 8.0, color: '#0c1422', count: 9 },
+  triwin:     { w: 1.20, h: 1.10, d: 0.06, color: '#0c1422', apex: 0.30 },
+  grill:      { w: 1.40, h: 0.45, d: 0.12, color: '#3a3a3e', count: 7 },
   door:       { w: 0.08, h: 2.05, d: 1.25, color: '#9ec5e8' },
   headlight:  { w: 0.22, h: 0.22, d: 0.10, color: '#fff5d8' },
   pantograph: { w: 1.6, h: 2.5, d: 0.8, color: '#383b40' },
@@ -574,6 +678,8 @@ function addPart(kind, atFront){
     // side at upper-body height so they're visible from outside.
     y = 2.3; x = 1.45;
   }
+  if (kind === 'triwin') y = 2.8;
+  if (kind === 'grill') y = 1.8;
   if (kind === 'door') y = 1.4;
   if (kind === 'headlight') y = 1.8;
   if (kind === 'pantograph') y = 3.0;
@@ -592,6 +698,7 @@ function addPart(kind, atFront){
   };
   if (def.tilt !== undefined) p.tilt = def.tilt;
   if (def.count !== undefined) p.count = def.count;
+  if (def.apex !== undefined) p.apex = def.apex;
   M.parts.push(p);
   rebuildPart(p);
   selectedId = p.id;
@@ -723,7 +830,10 @@ function refreshSidebar(){
       ? `<label>Tilt (front slope) <input data-k="tilt" type="number" step="0.05" value="${fmt(p.tilt)}"></label>`
       : '';
     const countRow = (p.count !== undefined)
-      ? `<label>Panes <input data-k="count" type="number" step="1" min="1" max="40" value="${Math.round(p.count)}"></label>`
+      ? `<label>${p.kind === 'grill' ? 'Slats' : 'Panes'} <input data-k="count" type="number" step="1" min="1" max="40" value="${Math.round(p.count)}"></label>`
+      : '';
+    const apexRow = (p.apex !== undefined)
+      ? `<label>Apex offset (lean) <input data-k="apex" type="number" step="0.05" value="${fmt(p.apex)}"></label>`
       : '';
     propsEl.innerHTML = `
       <label>Kind <input type="text" value="${p.kind}" disabled></label>
@@ -735,6 +845,7 @@ function refreshSidebar(){
       </div>
       ${tiltRow}
       ${countRow}
+      ${apexRow}
       <h2>Position</h2>
       <div class="grid3">
         <label>X (side) <input data-k="x" type="number" step="0.1" value="${fmt(p.x)}"></label>
@@ -891,6 +1002,7 @@ function exportDesign(){
       };
       if (p.tilt !== undefined) o.tilt = +p.tilt.toFixed(3);
       if (p.count !== undefined) o.count = Math.round(p.count);
+      if (p.apex !== undefined) o.apex = +p.apex.toFixed(3);
       return o;
     }),
   };
@@ -912,6 +1024,7 @@ function importDesign(json){
     };
     if (raw.tilt !== undefined) p.tilt = raw.tilt;
     if (raw.count !== undefined) p.count = raw.count;
+    if (raw.apex !== undefined) p.apex = raw.apex;
     M.parts.push(p);
     rebuildPart(p);
   }
