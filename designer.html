@@ -325,8 +325,15 @@ function buildPartMesh(p){
   else if (p.kind === 'wedge'){
     // A wedge — a box that's been tapered at the +Z end so the front face
     // slopes back. Built from a custom BufferGeometry so the slope is
-    // physically the geometry rather than a transform trick.
-    g.add(new THREE.Mesh(wedgeGeometry(p.w, p.h, p.d, p.tilt || 0.30), _mat(col)));
+    // physically the geometry rather than a transform trick. Rendered with
+    // MeshBasicMaterial so every face holds the same flat colour regardless
+    // of which way it's facing the sun — the angled walls don't pick up
+    // darker shading that made the wedge read as "two-toned" from the
+    // 3/4 view.
+    g.add(new THREE.Mesh(
+      wedgeGeometry(p.w, p.h, p.d, p.tilt || 0.30),
+      new THREE.MeshBasicMaterial({ color: col })
+    ));
   }
   else if (p.kind === 'cyl'){
     const r = Math.min(p.w, p.d) / 2;
