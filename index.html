@@ -14084,6 +14084,7 @@ const MAP_WELSHAM = {
     }
   ],
   "shapePoints": [],
+  "defaultRoute": "Limited Stops",
   "routes": [
     { "name": "Limited Stops",      "code": "2X43", "stations": [0, 3, 5, 7] },
     { "name": "Match-day Express",  "code": "2X44", "stations": [0, 4, 7]    }
@@ -21042,6 +21043,18 @@ function buildMenuList(){
 // physically passes through the same line but only dwells at called stations.
 // Index -1 is the synthetic "Full route" entry — every station called.
 function getRoutes(map){ return (map && Array.isArray(map.routes)) ? map.routes : []; }
+// Resolve the map's preferred starting route. The editor emits the named
+// route via the top-level `defaultRoute` field — if that matches one of the
+// routes, return its index; otherwise -1 (the synthetic "Full route" entry).
+function defaultRouteIdx(map){
+  if (!map || !map.defaultRoute) return -1;
+  const routes = getRoutes(map);
+  const target = String(map.defaultRoute).trim();
+  for (let i = 0; i < routes.length; i++){
+    if ((routes[i].name || '').trim() === target) return i;
+  }
+  return -1;
+}
 function _snapshotOrig(map){
   if (!map._origStations) map._origStations = map.stations.slice();
   if (!map._origSchedule) map._origSchedule = map.schedule.slice();
@@ -21187,9 +21200,11 @@ function selectMap(key){
   if (GS.map && GS.map.key === key) return;
   ROUTE = MAPS[key];
   GS.map = MAPS[key];
-  // Reset to "Full route" on map switch — route indices belong to whichever
-  // map they were exported from, so they don't carry across maps.
-  applyRouteByIdx(ROUTE, -1);
+  // Apply the map's preferred starting route. The editor lets the map
+  // author flag one route as the default via the top-level defaultRoute
+  // field; defaultRouteIdx() resolves that to a route index, or -1 ("Full
+  // route — all stops") when no default is named.
+  applyRouteByIdx(ROUTE, defaultRouteIdx(ROUTE));
   initRouteProjection();
   buildWorld();
   buildMenuList();
@@ -21325,6 +21340,11 @@ window.SIM = { GS, TRAINS, MAPS, scene, camera, renderer,
   get lookPitch(){return lookPitch;}, set lookPitch(v){lookPitch=v;} };
 
 // Boot
+// Honour the map's defaultRoute on first load — selectMap's early-return on
+// matching keys means it can't apply the default itself when GS.map.key was
+// already set to this map at module init time.
+applyRouteByIdx(ROUTE, defaultRouteIdx(ROUTE));
+initRouteProjection();
 buildWorld();          // initial world from MAPS.welsham (the only built-in ROUTE)
 buildMapList();        // render one button per MAPS entry
 selectMap(GS.map.key); // seed selected-state styling; same-key no-op skips rebuild
