@@ -171,6 +171,10 @@ button,input,select{font:inherit;color:inherit;}
         <div class="sw" style="background:linear-gradient(180deg,#c62828 33%,#f0e8d0 33%,#f0e8d0 66%,#205070 66%);color:#fff;">━</div>
         <div><div class="nm">Paint stripe</div><div class="sub">Livery band</div></div>
       </div>
+      <div class="pTile" data-add="paintSemi">
+        <div class="sw" style="background:linear-gradient(135deg,#ffaa00,#a05010);color:#fff;clip-path:polygon(0 100%,100% 100%,100% 50%,87% 25%,50% 8%,13% 25%,0 50%);">⌒</div>
+        <div><div class="nm">Paint semi-circle</div><div class="sub">Arch / dome</div></div>
+      </div>
     </aside>
 
     <div id="canvasWrap">
@@ -561,6 +565,14 @@ function buildPartMesh(p){
     // make it long-and-thin out of the box.
     g.add(new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), _paintMat(col)));
   }
+  else if (p.kind === 'paintSemi'){
+    // Semi-circular / elliptical-arch patch. Flat edge along X axis at the
+    // bottom, dome rising to +Y by height. Extruded by depth along Z so the
+    // arch has a visible thickness. Mesh is centred vertically so the
+    // properties-panel Y position lands the *centre* of the arch where the
+    // user expects (matches the other paint shapes' centroid placement).
+    g.add(new THREE.Mesh(semiArchGeometry(p.w, p.h, p.d), _paintMat(col)));
+  }
   // Apply transform — the part's world transform lives on the wrapper Group.
   return g;
 }
@@ -707,6 +719,32 @@ function _paintMat(col){
   });
 }
 
+// Semi-circular arch patch — half-ellipse outline (flat edge at y=0,
+// dome rising to y=h, base spanning x ∈ [-w/2, +w/2]) extruded by depth
+// along +Z. Returned mesh has its origin at the centroid of the bounding
+// box so the properties-panel position fields line up with the visual
+// centre of the shape.
+function semiArchGeometry(w, h, d){
+  const halfW = w / 2;
+  const arch = new THREE.Shape();
+  arch.moveTo(halfW, 0);
+  const segs = 36;
+  for (let i = 1; i <= segs; i++){
+    const a = Math.PI * i / segs;          // 0 → π sweeps from right rim to left rim
+    arch.lineTo(Math.cos(a) * halfW, Math.sin(a) * h);
+  }
+  arch.lineTo(halfW, 0);
+  const geo = new THREE.ExtrudeGeometry(arch, {
+    depth: d,
+    bevelEnabled: false,
+    curveSegments: 24,
+  });
+  // ExtrudeGeometry leaves the shape sitting on Z=0 — recentre on Z so the
+  // mesh's local origin is the centre of the slab, not its back face.
+  geo.translate(0, -h / 2, -d / 2);
+  return geo;
+}
+
 // Planar triangle with corners at top-centre (with optional apex X offset
 // for leaning windows), bottom-left and bottom-right. Wound CCW from +Z
 // so the textured side faces forward; DoubleSide handles the back view.
@@ -780,6 +818,7 @@ const DEFAULTS = {
   paintCircle:{ w: 0.30, h: 0.30, d: 0.02, color: '#5cc8ff' },
   paintTri:   { w: 0.30, h: 0.26, d: 0.02, color: '#ffd23a', apex: 0 },
   paintStripe:{ w: 8.00, h: 0.18, d: 0.02, color: '#c62828' },
+  paintSemi:  { w: 0.50, h: 0.25, d: 0.02, color: '#ffaa00' },
   door:       { w: 0.08, h: 2.05, d: 1.25, color: '#9ec5e8' },
   headlight:  { w: 0.22, h: 0.22, d: 0.10, color: '#fff5d8' },
   pantograph: { w: 1.6, h: 2.5, d: 0.8, color: '#383b40' },
@@ -812,6 +851,7 @@ function addPart(kind, atFront){
   if (kind === 'paintCircle') y = 2.0;
   if (kind === 'paintTri') y = 2.0;
   if (kind === 'paintStripe'){ y = 2.4; x = 1.45; }
+  if (kind === 'paintSemi') y = 2.4;
   // Step new parts to the right of existing ones so they don't all stack
   if (M.parts.length){
     const xs = M.parts.map(p => p.x + p.d / 2);
