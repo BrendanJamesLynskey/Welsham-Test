@@ -579,27 +579,22 @@ function buildPartMesh(p){
   }
   else if (p.kind === 'text'){
     // Lettering — user-typeable string baked to a canvas texture and mapped
-    // onto a thin slab. Renders as crisp text (canvas is high-res, mip
-    // mapping handles minification) in whichever colour the part carries.
-    // Background is transparent so the slab reads as floating letters
-    // against the body underneath.
+    // onto a single thin slab. Renders as crisp text (high-res canvas,
+    // mip mapping handles minification) in whichever colour the part
+    // carries. Background is transparent so the letters read as floating
+    // glyphs against the body panel underneath. Single-sided: the slab
+    // doesn't carry a mirrored copy on the back, so rotating around the
+    // part shows blank space when viewed from behind (the user can
+    // place / mirror a second part themselves for both-sides branding).
     const tex = textTexture(p.text || 'ABC', p.color);
     const mat = new THREE.MeshBasicMaterial({
       map: tex,
       transparent: true,
       alphaTest: 0.4,
-      side: THREE.DoubleSide,
     });
-    // Front and back faces of the slab carry the same texture, with the
-    // back mirrored so the lettering reads correctly when viewed from the
-    // far side too.
     const front = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.h), mat);
     front.position.z = p.d / 2;
     g.add(front);
-    const back = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.h), mat);
-    back.position.z = -p.d / 2;
-    back.rotation.y = Math.PI;
-    g.add(back);
   }
   // Apply transform — the part's world transform lives on the wrapper Group.
   return g;
