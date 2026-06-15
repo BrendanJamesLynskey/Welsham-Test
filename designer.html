@@ -175,6 +175,10 @@ button,input,select{font:inherit;color:inherit;}
         <div class="sw" style="background:linear-gradient(135deg,#ffaa00,#a05010);color:#fff;clip-path:polygon(0 100%,100% 100%,100% 50%,87% 25%,50% 8%,13% 25%,0 50%);">⌒</div>
         <div><div class="nm">Paint semi-circle</div><div class="sub">Arch / dome</div></div>
       </div>
+      <div class="pTile" data-add="text">
+        <div class="sw" style="background:linear-gradient(135deg,#1a1a1a,#2a2a2a);color:#f0e8d0;font-family:'Orbitron',sans-serif;font-weight:900;font-size:0.62rem;">ABC</div>
+        <div><div class="nm">Lettering</div><div class="sub">Numbers / words</div></div>
+      </div>
     </aside>
 
     <div id="canvasWrap">
@@ -573,6 +577,30 @@ function buildPartMesh(p){
     // user expects (matches the other paint shapes' centroid placement).
     g.add(new THREE.Mesh(semiArchGeometry(p.w, p.h, p.d), _paintMat(col)));
   }
+  else if (p.kind === 'text'){
+    // Lettering — user-typeable string baked to a canvas texture and mapped
+    // onto a thin slab. Renders as crisp text (canvas is high-res, mip
+    // mapping handles minification) in whichever colour the part carries.
+    // Background is transparent so the slab reads as floating letters
+    // against the body underneath.
+    const tex = textTexture(p.text || 'ABC', p.color);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      alphaTest: 0.4,
+      side: THREE.DoubleSide,
+    });
+    // Front and back faces of the slab carry the same texture, with the
+    // back mirrored so the lettering reads correctly when viewed from the
+    // far side too.
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.h), mat);
+    front.position.z = p.d / 2;
+    g.add(front);
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.h), mat);
+    back.position.z = -p.d / 2;
+    back.rotation.y = Math.PI;
+    g.add(back);
+  }
   // Apply transform — the part's world transform lives on the wrapper Group.
   return g;
 }
@@ -719,6 +747,42 @@ function _paintMat(col){
   });
 }
 
+// Render a string into a high-resolution canvas, scaled so the letters fill
+// the canvas width, and return a CanvasTexture ready to map onto a plane.
+// Background is transparent and the font is rendered in `col` (a hex
+// string) so the slab carries just the lettering against whatever's
+// behind it.
+function textTexture(text, col){
+  const safe = String(text == null ? '' : text);
+  const W = 1024, H = 256;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = col || '#f0e8d0';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Pick a base font size, then re-measure once with a candidate font and
+  // shrink/grow so the rendered text spans most of the canvas. Cap the font
+  // height too — long strings need to shrink to fit but tall single letters
+  // shouldn't blow past the canvas vertical bounds.
+  let fontPx = 220;
+  ctx.font = `900 ${fontPx}px Orbitron, "Roboto Mono", sans-serif`;
+  const m = ctx.measureText(safe);
+  const targetW = W * 0.92;
+  if (m.width > 0){
+    fontPx = Math.min(fontPx, Math.floor(fontPx * targetW / m.width));
+    fontPx = Math.min(fontPx, Math.floor(H * 0.85));
+  }
+  ctx.font = `900 ${fontPx}px Orbitron, "Roboto Mono", sans-serif`;
+  ctx.fillText(safe, W / 2, H / 2 + fontPx * 0.04);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;   // crisper at oblique angles
+  tex.needsUpdate = true;
+  return tex;
+}
+
 // Semi-circular arch patch — half-ellipse outline (flat edge at y=0,
 // dome rising to y=h, base spanning x ∈ [-w/2, +w/2]) extruded by depth
 // along +Z. Returned mesh has its origin at the centroid of the bounding
@@ -819,6 +883,7 @@ const DEFAULTS = {
   paintTri:   { w: 0.30, h: 0.26, d: 0.02, color: '#ffd23a', apex: 0 },
   paintStripe:{ w: 8.00, h: 0.18, d: 0.02, color: '#c62828' },
   paintSemi:  { w: 0.50, h: 0.25, d: 0.02, color: '#ffaa00' },
+  text:       { w: 1.20, h: 0.35, d: 0.03, color: '#f0e8d0', text: 'LNER' },
   door:       { w: 0.08, h: 2.05, d: 1.25, color: '#9ec5e8' },
   headlight:  { w: 0.22, h: 0.22, d: 0.10, color: '#fff5d8' },
   pantograph: { w: 1.6, h: 2.5, d: 0.8, color: '#383b40' },
@@ -852,6 +917,7 @@ function addPart(kind, atFront){
   if (kind === 'paintTri') y = 2.0;
   if (kind === 'paintStripe'){ y = 2.4; x = 1.45; }
   if (kind === 'paintSemi') y = 2.4;
+  if (kind === 'text'){ y = 2.0; x = 1.45; }
   // Step new parts to the right of existing ones so they don't all stack
   if (M.parts.length){
     const xs = M.parts.map(p => p.x + p.d / 2);
@@ -867,6 +933,7 @@ function addPart(kind, atFront){
   if (def.tilt !== undefined) p.tilt = def.tilt;
   if (def.count !== undefined) p.count = def.count;
   if (def.apex !== undefined) p.apex = def.apex;
+  if (def.text !== undefined) p.text = def.text;
   M.parts.push(p);
   rebuildPart(p);
   selectedId = p.id;
@@ -1018,6 +1085,9 @@ function refreshSidebar(){
     const apexRow = (p.apex !== undefined)
       ? `<label>Apex offset (lean) <input data-k="apex" type="number" step="0.05" value="${fmt(p.apex)}"></label>`
       : '';
+    const textRow = (p.text !== undefined)
+      ? `<label>Text <input data-k="text" type="text" value="${String(p.text).replace(/"/g, '&quot;')}" placeholder="LNER"></label>`
+      : '';
     propsEl.innerHTML = `
       <label>Kind <input type="text" value="${p.kind}" disabled></label>
       <h2>Size</h2>
@@ -1029,6 +1099,7 @@ function refreshSidebar(){
       ${tiltRow}
       ${countRow}
       ${apexRow}
+      ${textRow}
       <h2>Position</h2>
       <div class="grid3">
         <label>X (side) <input data-k="x" type="number" step="0.1" value="${fmt(p.x)}"></label>
@@ -1226,6 +1297,7 @@ function exportDesign(){
       if (p.tilt !== undefined) o.tilt = +p.tilt.toFixed(3);
       if (p.count !== undefined) o.count = Math.round(p.count);
       if (p.apex !== undefined) o.apex = +p.apex.toFixed(3);
+      if (p.text !== undefined) o.text = String(p.text);
       return o;
     }),
   };
@@ -1248,6 +1320,7 @@ function importDesign(json){
     if (raw.tilt !== undefined) p.tilt = raw.tilt;
     if (raw.count !== undefined) p.count = raw.count;
     if (raw.apex !== undefined) p.apex = raw.apex;
+    if (raw.text !== undefined) p.text = raw.text;
     M.parts.push(p);
     rebuildPart(p);
   }
