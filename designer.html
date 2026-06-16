@@ -153,6 +153,14 @@ button,input,select{font:inherit;color:inherit;}
         <div class="sw" style="background:radial-gradient(circle,#cfd4dc 32%,#404048 60%,#101014 100%);">●</div>
         <div><div class="nm">Buffer</div><div class="sub">Coupling buffer</div></div>
       </div>
+      <div class="pTile" data-add="corridor">
+        <div class="sw" style="background:repeating-linear-gradient(90deg,#1a1a1c 0,#1a1a1c 3px,#404048 3px,#404048 5px);color:#cfe6f7;">⫼</div>
+        <div><div class="nm">Corridor</div><div class="sub">Gangway bellows</div></div>
+      </div>
+      <div class="pTile" data-add="coupler">
+        <div class="sw" style="background:linear-gradient(135deg,#3a3a3e,#1a1a1c);color:#cfd4dc;">⬛</div>
+        <div><div class="nm">Coupler</div><div class="sub">Knuckle hitch</div></div>
+      </div>
 
       <h2>Paint shapes</h2>
       <div class="pTile" data-add="paintRect">
@@ -491,6 +499,115 @@ function buildPartMesh(p){
   }
   else if (p.kind === 'bogie' || p.kind === 'bogieJ'){
     g.add(buildBogie(p));
+  }
+  else if (p.kind === 'corridor'){
+    // Inter-vehicle gangway — rectangular box with vertical accordion ribs
+    // running around the perimeter, plus a darker recessed interior so the
+    // bellows reads as something the camera can see *into*. Each rib is a
+    // slightly proud frame stamped along the part's Z axis; the count of
+    // ribs scales with depth so longer connectors get more pleats.
+    const bellowsMat = _mat(0x141418, { roughness: 0.85, metalness: 0.05 });
+    const ribMat = _mat(col, { roughness: 0.70, metalness: 0.05 });
+    const ribCount = Math.max(3, Math.min(14, Math.round(p.d / 0.10)));
+    // Recessed interior — slightly smaller than the outer envelope, sits
+    // INSIDE the rib stack so the central walking space is visible.
+    const cavity = new THREE.Mesh(
+      new THREE.BoxGeometry(p.w * 0.84, p.h * 0.92, p.d * 0.96),
+      bellowsMat
+    );
+    g.add(cavity);
+    // Accordion ribs — slim rectangular frames around the perimeter,
+    // spaced along Z. Each rib is a TUBE-style square ring (outer box
+    // minus inner box) approximated by four thin bars (top / bottom /
+    // left / right).
+    const ribThk = 0.04;
+    const ribProud = 0.04;
+    const ribW = p.w + ribProud;
+    const ribH = p.h + ribProud;
+    for (let k = 0; k < ribCount; k++){
+      const z = -p.d / 2 + (k + 0.5) / ribCount * p.d;
+      const topBar = new THREE.Mesh(
+        new THREE.BoxGeometry(ribW + 0.02, ribThk, ribThk),
+        ribMat
+      );
+      topBar.position.set(0, ribH / 2, z);
+      g.add(topBar);
+      const botBar = topBar.clone();
+      botBar.position.set(0, -ribH / 2, z);
+      g.add(botBar);
+      const leftBar = new THREE.Mesh(
+        new THREE.BoxGeometry(ribThk, ribH - 0.02, ribThk),
+        ribMat
+      );
+      leftBar.position.set(-ribW / 2, 0, z);
+      g.add(leftBar);
+      const rightBar = leftBar.clone();
+      rightBar.position.set(ribW / 2, 0, z);
+      g.add(rightBar);
+    }
+    // End collars — slightly thicker boxes capping each end so the
+    // gangway has a visible mating face against the body
+    const collarMat = _mat(0x202024, { roughness: 0.7, metalness: 0.15 });
+    for (const zSide of [-1, 1]){
+      const collar = new THREE.Mesh(
+        new THREE.BoxGeometry(p.w + 0.04, p.h + 0.04, 0.06),
+        collarMat
+      );
+      collar.position.z = zSide * (p.d / 2 + 0.03);
+      g.add(collar);
+    }
+  }
+  else if (p.kind === 'coupler'){
+    // Heavy knuckle / buckeye coupling for freight and loco-to-coach
+    // connections. Built as a mounting flange + drawbar shank + bulkier
+    // knuckle head, all in dark steel. Defaults sized for a buckeye on
+    // a UK loco — the head sits at the +Z end so two couplers face each
+    // other when one is mirrored / rotated 180°.
+    const steelMat = _mat(col, { roughness: 0.45, metalness: 0.55 });
+    const wearMat = _mat(0x141414, { roughness: 0.65, metalness: 0.40 });
+    // Mounting flange — short flat box against the body face
+    const flange = new THREE.Mesh(
+      new THREE.BoxGeometry(p.w * 1.2, p.h * 1.2, p.d * 0.10),
+      wearMat
+    );
+    flange.position.z = -p.d / 2 + 0.03;
+    g.add(flange);
+    // Drawbar shank — thick rectangular bar leading from the flange
+    // forward to the knuckle. Slightly tapered (a narrower box near the
+    // head) for a less plain silhouette.
+    const shankL = p.d * 0.65;
+    const shank = new THREE.Mesh(
+      new THREE.BoxGeometry(p.w * 0.55, p.h * 0.55, shankL),
+      steelMat
+    );
+    shank.position.z = -p.d / 2 + 0.06 + shankL / 2;
+    g.add(shank);
+    // Knuckle head — chunky block with a "C"-shaped recess where the
+    // mating coupler hooks in. Approximated by a wider box with a
+    // smaller dark box stamped into its front.
+    const headD = p.d * 0.32;
+    const head = new THREE.Mesh(
+      new THREE.BoxGeometry(p.w, p.h, headD),
+      steelMat
+    );
+    head.position.z = p.d / 2 - headD / 2;
+    g.add(head);
+    // Knuckle pocket — dark recess on the +Z face suggesting the open
+    // throat of the coupler
+    const pocket = new THREE.Mesh(
+      new THREE.BoxGeometry(p.w * 0.45, p.h * 0.55, headD * 0.6),
+      wearMat
+    );
+    pocket.position.set(p.w * 0.15, 0, p.d / 2 - headD * 0.32);
+    g.add(pocket);
+    // Locking pin — short vertical cylinder protruding from the top of
+    // the head, the pivot the knuckle swings on in real life
+    const pin = new THREE.Mesh(
+      new THREE.CylinderGeometry(p.h * 0.10, p.h * 0.10, p.h * 0.25, 14),
+      wearMat
+    );
+    pin.position.set(-p.w * 0.18, p.h * 0.55, p.d / 2 - headD * 0.4);
+    g.add(pin);
   }
   else if (p.kind === 'buffer'){
     // UK-style centre / side buffer: chunky cylindrical shaft projecting
@@ -873,6 +990,8 @@ const DEFAULTS = {
   triwin:     { w: 1.20, h: 1.10, d: 0.06, color: '#0c1422', apex: 0.30 },
   grill:      { w: 1.40, h: 0.45, d: 0.12, color: '#3a3a3e', count: 7 },
   buffer:     { w: 0.20, h: 0.36, d: 0.32, color: '#3a3a3e' },
+  corridor:   { w: 1.40, h: 2.00, d: 0.60, color: '#404048' },
+  coupler:    { w: 0.42, h: 0.34, d: 0.55, color: '#3a3a3e' },
   paintRect:  { w: 0.45, h: 0.18, d: 0.02, color: '#c62828' },
   paintCircle:{ w: 0.30, h: 0.30, d: 0.02, color: '#5cc8ff' },
   paintTri:   { w: 0.30, h: 0.26, d: 0.02, color: '#ffd23a', apex: 0 },
@@ -907,6 +1026,8 @@ function addPart(kind, atFront){
   if (kind === 'pantograph') y = 3.0;
   if (kind === 'roof') y = 2.95;
   if (kind === 'buffer'){ y = 1.0; x = 1.0; }
+  if (kind === 'corridor') y = 2.0;
+  if (kind === 'coupler') y = 1.0;
   if (kind === 'paintRect') y = 1.5;
   if (kind === 'paintCircle') y = 2.0;
   if (kind === 'paintTri') y = 2.0;
