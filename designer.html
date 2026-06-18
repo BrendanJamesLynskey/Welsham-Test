@@ -59,6 +59,14 @@ button,input,select{font:inherit;color:inherit;}
 #sidebar #partList li.sel{border-color:#5cc8ff;background:rgba(28,52,82,0.55);}
 #sidebar #partList li .lbl{font-size:0.72rem;color:#cfe6f7;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 #sidebar #partList li .x{background:transparent;border:1px solid rgba(255,128,96,0.3);color:#ffb09c;width:1.4rem;height:1.4rem;padding:0;font-size:0.7rem;border-radius:2px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 auto;}
+#sidebar #partList li.gHdr{background:rgba(28,52,82,0.55);border:1px solid rgba(92,200,255,0.32);cursor:default;padding:0.36rem 0.5rem;margin-top:0.7rem;}
+#sidebar #partList li.gHdr:first-child{margin-top:0;}
+#sidebar #partList li.gHdr .gLbl{font-size:0.7rem;color:#9ccfff;letter-spacing:0.16em;text-transform:uppercase;font-family:'Orbitron',sans-serif;flex:1;}
+#sidebar #partList li.gHdr .gCnt{display:inline-block;margin-left:0.4em;padding:0.05em 0.45em;background:rgba(92,200,255,0.18);border-radius:8px;color:#cfe6f7;font-size:0.62rem;letter-spacing:0.08em;}
+#sidebar #partList li.gHdr .gBtn{background:rgba(14,28,46,0.7);border:1px solid rgba(92,200,255,0.32);color:rgba(207,230,247,0.85);width:1.5rem;height:1.5rem;font-size:0.78rem;padding:0;border-radius:2px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 auto;font-family:'Roboto Mono',monospace;}
+#sidebar #partList li.gHdr .gBtn:hover{border-color:rgba(92,200,255,0.6);color:#fff;background:rgba(28,52,82,0.85);}
+#sidebar #partList li.gHdr .gBtn.gDel{border-color:rgba(255,128,96,0.32);color:#ffb09c;}
+#sidebar #partList li.gHdr .gBtn.gDel:hover{background:rgba(80,28,20,0.55);}
 
 #statusbar{background:#0a1424;border-top:1px solid rgba(92,200,255,0.18);padding:0.34rem 0.75rem;display:flex;justify-content:space-between;font-size:0.65rem;letter-spacing:0.1em;color:rgba(180,210,235,0.55);text-transform:uppercase;}
 </style>
@@ -1045,6 +1053,7 @@ function addPart(kind, atFront){
     x, y, z,
     rx: 0, ry: 0, rz: 0,
     color: def.color,
+    group: '',
   };
   if (def.tilt !== undefined) p.tilt = def.tilt;
   if (def.count !== undefined) p.count = def.count;
@@ -1230,6 +1239,8 @@ function refreshSidebar(){
       </div>
       <h2>Colour</h2>
       <label><input data-k="color" type="color" value="${p.color}"></label>
+      <h2>Group</h2>
+      <label>Name <input data-k="group" type="text" value="${escapeForAttr(p.group || '')}" placeholder="e.g. Loco, Coach 1"></label>
       <h2>Mirror</h2>
       <div class="grid3" style="gap:0.32rem;">
         <button data-mirror="x" style="width:auto;">Mirror X</button>
@@ -1335,25 +1346,108 @@ function mirrorPart(src, axis){
 }
 function refreshPartList(){
   partListEl.innerHTML = '';
+  // Bucket parts by group name, preserving original insertion order within
+  // each bucket. Ungrouped parts sit under a leading "—" header so the
+  // user can find them even when most of the design is grouped.
+  const buckets = new Map();
   for (const p of M.parts){
-    const li = document.createElement('li');
-    if (p.id === selectedId) li.classList.add('sel');
-    li.innerHTML = `
-      <span class="lbl">${p.kind} · ${fmt(p.w)}×${fmt(p.h)}×${fmt(p.d)}</span>
-      <button class="x" data-del="${p.id}">✕</button>
-    `;
-    li.addEventListener('click', e => {
-      if (e.target.dataset.del) return;
-      selectedId = p.id;
-      syncOutline();
-      refreshSidebar();
-    });
-    li.querySelector('.x').addEventListener('click', e => {
-      e.stopPropagation();
-      deletePart(e.currentTarget.dataset.del);
-    });
-    partListEl.appendChild(li);
+    const key = (p.group || '').trim() || '';
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(p);
   }
+  // Always render the ungrouped bucket first
+  const keys = [];
+  if (buckets.has('')) keys.push('');
+  for (const k of buckets.keys()) if (k !== '') keys.push(k);
+  for (const key of keys){
+    const parts = buckets.get(key);
+    const header = document.createElement('li');
+    header.className = 'gHdr';
+    const label = key === '' ? '— ungrouped' : key;
+    header.innerHTML = `
+      <span class="gLbl">${escapeForHtml(label)} <span class="gCnt">${parts.length}</span></span>
+      ${key !== '' ? `<button class="gBtn" data-gdup="${escapeForAttr(key)}" title="Duplicate group">⎘</button>
+                     <button class="gBtn gDel" data-gdel="${escapeForAttr(key)}" title="Delete group">✕</button>` : ''}
+    `;
+    partListEl.appendChild(header);
+    if (key !== ''){
+      header.querySelector('button[data-gdup]').addEventListener('click', e => {
+        e.stopPropagation();
+        duplicateGroup(key);
+      });
+      header.querySelector('button[data-gdel]').addEventListener('click', e => {
+        e.stopPropagation();
+        if (!confirm(`Delete all ${parts.length} part${parts.length===1?'':'s'} in "${key}"?`)) return;
+        deleteGroup(key);
+      });
+    }
+    for (const p of parts){
+      const li = document.createElement('li');
+      if (p.id === selectedId) li.classList.add('sel');
+      li.innerHTML = `
+        <span class="lbl">${p.kind} · ${fmt(p.w)}×${fmt(p.h)}×${fmt(p.d)}</span>
+        <button class="x" data-del="${p.id}">✕</button>
+      `;
+      li.addEventListener('click', e => {
+        if (e.target.dataset.del) return;
+        selectedId = p.id;
+        syncOutline();
+        refreshSidebar();
+      });
+      li.querySelector('.x').addEventListener('click', e => {
+        e.stopPropagation();
+        deletePart(e.currentTarget.dataset.del);
+      });
+      partListEl.appendChild(li);
+    }
+  }
+}
+
+function escapeForHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function escapeForAttr(s){ return String(s).replace(/"/g, '&quot;'); }
+
+// Duplicate every part in a named group. Each clone gets a fresh id, the
+// group name auto-increments ("Coach 1" → "Coach 2", "Loco" → "Loco 2"),
+// and the whole cluster is offset along +Z by the group's bounding-box
+// depth so the copy lands behind the original rather than on top of it.
+function duplicateGroup(name){
+  const members = M.parts.filter(p => (p.group || '') === name);
+  if (!members.length) return;
+  const newName = _bumpGroupName(name);
+  let minZ = Infinity, maxZ = -Infinity;
+  for (const p of members){
+    const zMin = p.z - p.d / 2;
+    const zMax = p.z + p.d / 2;
+    if (zMin < minZ) minZ = zMin;
+    if (zMax > maxZ) maxZ = zMax;
+  }
+  const span = Math.max(1.0, maxZ - minZ + 0.5);
+  for (const src of members){
+    const clone = { ...src };
+    delete clone._obj;
+    clone.id = uid();
+    clone.group = newName;
+    clone.z = src.z + span;
+    M.parts.push(clone);
+    rebuildPart(clone);
+  }
+  selectedId = null;
+  syncOutline();
+  refreshSidebar();
+  updateStats();
+  msg('Duplicated "' + name + '" → "' + newName + '"', 'ok');
+}
+function _bumpGroupName(name){
+  const m = String(name).match(/^(.*?)(\d+)\s*$/);
+  if (m){
+    return m[1] + (parseInt(m[2], 10) + 1);
+  }
+  return name + ' 2';
+}
+function deleteGroup(name){
+  const ids = M.parts.filter(p => (p.group || '') === name).map(p => p.id);
+  for (const id of ids) deletePart(id);
+  msg('Deleted group "' + name + '"', 'ok');
 }
 
 // ============================================================
@@ -1414,6 +1508,7 @@ function exportDesign(){
       if (p.count !== undefined) o.count = Math.round(p.count);
       if (p.apex !== undefined) o.apex = +p.apex.toFixed(3);
       if (p.text !== undefined) o.text = String(p.text);
+      if (p.group) o.group = String(p.group);
       return o;
     }),
   };
@@ -1437,6 +1532,7 @@ function importDesign(json){
     if (raw.count !== undefined) p.count = raw.count;
     if (raw.apex !== undefined) p.apex = raw.apex;
     if (raw.text !== undefined) p.text = raw.text;
+    p.group = raw.group || '';
     M.parts.push(p);
     rebuildPart(p);
   }
