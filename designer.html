@@ -67,6 +67,17 @@ button,input,select{font:inherit;color:inherit;}
 #sidebar #partList li.gHdr .gBtn:hover{border-color:rgba(92,200,255,0.6);color:#fff;background:rgba(28,52,82,0.85);}
 #sidebar #partList li.gHdr .gBtn.gDel{border-color:rgba(255,128,96,0.32);color:#ffb09c;}
 #sidebar #partList li.gHdr .gBtn.gDel:hover{background:rgba(80,28,20,0.55);}
+#sidebar #partList li.gHdr.gPasteBar{background:rgba(28,82,52,0.55);border:1px solid rgba(92,255,140,0.4);margin-top:0;}
+#sidebar #partList li.gHdr.gPasteBar .gLbl{color:#9cff9c;}
+#sidebar #partList li.gHdr.gPasteBar .gBtn{border-color:rgba(92,255,140,0.4);color:#cff2cf;}
+#sidebar #partList li.gHdr.gPasteBar .gBtn:hover{background:rgba(20,60,30,0.7);}
+#sidebar #partList li.gMove{display:block;background:rgba(12,24,40,0.7);border:1px solid rgba(92,200,255,0.28);border-top:0;padding:0.5rem 0.6rem 0.55rem;margin-top:-0.22rem;margin-bottom:0.32rem;cursor:default;}
+#sidebar #partList li.gMove .gMoveRow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.35rem;margin-bottom:0.4rem;}
+#sidebar #partList li.gMove .gMoveRow:last-child{grid-template-columns:1fr 1fr;margin-bottom:0;}
+#sidebar #partList li.gMove label{display:flex;flex-direction:column;font-size:0.58rem;letter-spacing:0.1em;text-transform:uppercase;color:rgba(180,210,235,0.6);}
+#sidebar #partList li.gMove input.mv{background:#0c1828;border:1px solid rgba(92,200,255,0.28);color:#cfe6f7;padding:0.3rem 0.4rem;font-size:0.76rem;margin-top:0.14rem;border-radius:2px;letter-spacing:normal;text-transform:none;width:100%;}
+#sidebar #partList li.gMove button{background:rgba(14,28,46,0.7);border:1px solid rgba(92,200,255,0.4);color:rgba(207,230,247,0.9);padding:0.34rem 0.5rem;font-size:0.66rem;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;border-radius:2px;font-family:'Roboto Mono',monospace;}
+#sidebar #partList li.gMove button:hover{border-color:#5cc8ff;color:#fff;background:rgba(28,52,82,0.75);}
 
 #statusbar{background:#0a1424;border-top:1px solid rgba(92,200,255,0.18);padding:0.34rem 0.75rem;display:flex;justify-content:space-between;font-size:0.65rem;letter-spacing:0.1em;color:rgba(180,210,235,0.55);text-transform:uppercase;}
 </style>
@@ -1344,8 +1355,35 @@ function mirrorPart(src, axis){
   updateStats();
   msg('Mirrored on ' + axis.toUpperCase(), 'ok');
 }
+// Which group currently has its Move panel expanded. Cleared on any
+// state change that regenerates the parts list, so opening a panel is a
+// per-interaction thing rather than a persistent toggle.
+let openMovePanelFor = null;
+
 function refreshPartList(){
   partListEl.innerHTML = '';
+  // "Paste group" strip at the top when the group clipboard has content.
+  // Sits above every real bucket so the drop target is obvious as soon as
+  // a group has been copied.
+  if (groupClipboard){
+    const paste = document.createElement('li');
+    paste.className = 'gHdr gPasteBar';
+    paste.innerHTML = `
+      <span class="gLbl">📋 Paste "${escapeForHtml(groupClipboard.name)}" <span class="gCnt">${groupClipboard.parts.length}</span></span>
+      <button class="gBtn" id="btnPasteGroup" title="Paste group">↓</button>
+      <button class="gBtn gDel" id="btnClearGroupClip" title="Clear clipboard">✕</button>
+    `;
+    partListEl.appendChild(paste);
+    paste.querySelector('#btnPasteGroup').addEventListener('click', e => {
+      e.stopPropagation();
+      pasteGroup();
+    });
+    paste.querySelector('#btnClearGroupClip').addEventListener('click', e => {
+      e.stopPropagation();
+      groupClipboard = null;
+      refreshPartList();
+    });
+  }
   // Bucket parts by group name, preserving original insertion order within
   // each bucket. Ungrouped parts sit under a leading "—" header so the
   // user can find them even when most of the design is grouped.
@@ -1366,11 +1404,22 @@ function refreshPartList(){
     const label = key === '' ? '— ungrouped' : key;
     header.innerHTML = `
       <span class="gLbl">${escapeForHtml(label)} <span class="gCnt">${parts.length}</span></span>
-      ${key !== '' ? `<button class="gBtn" data-gdup="${escapeForAttr(key)}" title="Duplicate group">⎘</button>
+      ${key !== '' ? `<button class="gBtn" data-gmov="${escapeForAttr(key)}" title="Move group">↔</button>
+                     <button class="gBtn" data-gcpy="${escapeForAttr(key)}" title="Copy group">✂</button>
+                     <button class="gBtn" data-gdup="${escapeForAttr(key)}" title="Duplicate group">⎘</button>
                      <button class="gBtn gDel" data-gdel="${escapeForAttr(key)}" title="Delete group">✕</button>` : ''}
     `;
     partListEl.appendChild(header);
     if (key !== ''){
+      header.querySelector('button[data-gmov]').addEventListener('click', e => {
+        e.stopPropagation();
+        openMovePanelFor = (openMovePanelFor === key) ? null : key;
+        refreshPartList();
+      });
+      header.querySelector('button[data-gcpy]').addEventListener('click', e => {
+        e.stopPropagation();
+        copyGroup(key);
+      });
       header.querySelector('button[data-gdup]').addEventListener('click', e => {
         e.stopPropagation();
         duplicateGroup(key);
@@ -1379,6 +1428,39 @@ function refreshPartList(){
         e.stopPropagation();
         if (!confirm(`Delete all ${parts.length} part${parts.length===1?'':'s'} in "${key}"?`)) return;
         deleteGroup(key);
+      });
+    }
+    // Inline Move panel — appears below the header for whichever group has
+    // openMovePanelFor set. Three offset inputs + Apply. Clicking Apply
+    // shifts every member of the group and rebuilds their meshes.
+    if (key !== '' && openMovePanelFor === key){
+      const mv = document.createElement('li');
+      mv.className = 'gMove';
+      mv.innerHTML = `
+        <div class="gMoveRow">
+          <label>ΔX <input class="mv" data-mv="dx" type="number" step="0.5" value="0"></label>
+          <label>ΔY <input class="mv" data-mv="dy" type="number" step="0.5" value="0"></label>
+          <label>ΔZ <input class="mv" data-mv="dz" type="number" step="0.5" value="0"></label>
+        </div>
+        <div class="gMoveRow gMoveBtns">
+          <button data-mvApply="${escapeForAttr(key)}">Apply</button>
+          <button data-mvCancel="1">Cancel</button>
+        </div>
+      `;
+      partListEl.appendChild(mv);
+      mv.querySelector('button[data-mvApply]').addEventListener('click', e => {
+        e.stopPropagation();
+        const dx = parseFloat(mv.querySelector('input[data-mv="dx"]').value) || 0;
+        const dy = parseFloat(mv.querySelector('input[data-mv="dy"]').value) || 0;
+        const dz = parseFloat(mv.querySelector('input[data-mv="dz"]').value) || 0;
+        moveGroup(key, dx, dy, dz);
+        openMovePanelFor = null;
+        refreshSidebar();
+      });
+      mv.querySelector('button[data-mvCancel]').addEventListener('click', e => {
+        e.stopPropagation();
+        openMovePanelFor = null;
+        refreshPartList();
       });
     }
     for (const p of parts){
@@ -1448,6 +1530,73 @@ function deleteGroup(name){
   const ids = M.parts.filter(p => (p.group || '') === name).map(p => p.id);
   for (const id of ids) deletePart(id);
   msg('Deleted group "' + name + '"', 'ok');
+}
+
+// Shift every part in a named group by (dx, dy, dz). Meshes rebuild in place
+// so the next frame reflects the new positions and the selection outline
+// follows if the moved group contains the currently selected part.
+function moveGroup(name, dx, dy, dz){
+  const members = M.parts.filter(p => (p.group || '') === name);
+  if (!members.length){ msg('Group "' + name + '" is empty', 'warn'); return; }
+  for (const p of members){
+    p.x += dx; p.y += dy; p.z += dz;
+    rebuildPart(p);
+  }
+  syncOutline();
+  msg(`Moved "${name}" by (${dx.toFixed(2)}, ${dy.toFixed(2)}, ${dz.toFixed(2)})`, 'ok');
+}
+
+// Group clipboard — separate from the single-part clipboard so copying one
+// then the other doesn't clobber each other's state. Stores a stripped
+// snapshot of every part (no live three.js refs) plus the source group
+// name so the paste target's auto-name derives from it.
+let groupClipboard = null;
+function copyGroup(name){
+  const members = M.parts.filter(p => (p.group || '') === name);
+  if (!members.length){ msg('Group "' + name + '" is empty', 'warn'); return; }
+  const snap = members.map(p => {
+    const s = { ...p };
+    delete s._obj;
+    delete s.id;
+    return s;
+  });
+  groupClipboard = { name, parts: snap };
+  refreshPartList();
+  msg(`Copied "${name}" (${snap.length} part${snap.length===1?'':'s'})`, 'ok');
+}
+function pasteGroup(){
+  if (!groupClipboard){ msg('Group clipboard empty', 'warn'); return; }
+  // Auto-increment the source name, then keep bumping if the new name
+  // already exists — never overwrite an active group.
+  const existing = new Set(M.parts.map(p => (p.group || '').trim()).filter(Boolean));
+  let newName = _bumpGroupName(groupClipboard.name);
+  while (existing.has(newName)) newName = _bumpGroupName(newName);
+  // Offset along +Z by the source group's bounding span so paste lands
+  // behind the ORIGINAL "Coach 1" cluster — clean chain of coaches.
+  let minZ = Infinity, maxZ = -Infinity;
+  for (const s of groupClipboard.parts){
+    const zMin = s.z - s.d / 2, zMax = s.z + s.d / 2;
+    if (zMin < minZ) minZ = zMin;
+    if (zMax > maxZ) maxZ = zMax;
+  }
+  const span = Math.max(1.0, maxZ - minZ + 0.5);
+  for (const s of groupClipboard.parts){
+    const clone = { ...s, id: uid(), group: newName };
+    clone.z = s.z + span;
+    M.parts.push(clone);
+    rebuildPart(clone);
+  }
+  // Advance the clipboard's anchor too, so tapping Paste twice drops the
+  // second copy behind the first rather than on top of it.
+  groupClipboard = {
+    name: newName,
+    parts: groupClipboard.parts.map(s => ({ ...s, z: s.z + span })),
+  };
+  selectedId = null;
+  syncOutline();
+  refreshSidebar();
+  updateStats();
+  msg(`Pasted → "${newName}"`, 'ok');
 }
 
 // ============================================================
